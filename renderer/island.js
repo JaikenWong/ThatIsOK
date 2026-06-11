@@ -4,6 +4,7 @@ const island = document.getElementById('island');
 const pillContent = document.getElementById('pillContent');
 const expandedContent = document.getElementById('expandedContent');
 const primaryLabel = document.getElementById('primaryLabel');
+const primaryLabelText = document.getElementById('primaryLabelText');
 const primaryValue = document.getElementById('primaryValue');
 const pillProgress = document.getElementById('pillProgress');
 const sessionsList = document.getElementById('sessionsList');
@@ -199,15 +200,15 @@ function renderSummary(data) {
     const primaryAccount = visibleAccounts[0];
 
     if (progressAccounts.length) {
-        primaryLabel.innerText = progressAccounts.length > 1 ? 'Providers' : (primaryAccount ? primaryAccount.label : 'Provider');
+        primaryLabelText.innerText = progressAccounts.length > 1 ? 'Providers' : (primaryAccount ? primaryAccount.label : 'Provider');
         primaryValue.innerText = primaryAccount ? (primaryAccount.plan || 'Live') : 'Live';
         renderPillProgress(progressAccounts);
     } else if (primaryAccount) {
-        primaryLabel.innerText = primaryAccount.label || 'Provider';
+        primaryLabelText.innerText = primaryAccount.label || 'Provider';
         primaryValue.innerText = renderAccountHeadline(primaryAccount);
         hidePillProgress();
     } else {
-        primaryLabel.innerText = 'Status';
+        primaryLabelText.innerText = 'Status';
         primaryValue.innerText = 'Live';
         hidePillProgress();
     }
@@ -240,8 +241,8 @@ function renderPillProgress(accounts) {
         const limit = Number(progressLine.limit || 0);
         const percent = Math.max(0, Math.min(100, limit > 0 ? (used / limit) * 100 : 0));
         const displayPercent = progressLine.format?.mode === 'remaining' ? percent : Math.max(0, 100 - percent);
-        const radius = displayAccounts.length > 1 ? 12 : 19;
-        const size = displayAccounts.length > 1 ? 28 : 40;
+        const radius = displayAccounts.length > 1 ? 12 : 17;
+        const size = displayAccounts.length > 1 ? 28 : 36;
         const center = size / 2;
         const circumference = 2 * Math.PI * radius;
         const offset = circumference * (1 - displayPercent / 100);
@@ -290,6 +291,23 @@ function getProviderShortLabel(account) {
     return map[account.provider] || String(account.label || '?').slice(0, 1).toUpperCase();
 }
 
+function getProviderShortLabelByKey(provider, fallbackLabel = '?') {
+    const map = {
+        codex: 'C',
+        claude: 'A',
+        gemini: 'G',
+        minimax: 'M',
+        cursor: 'R',
+        deepseek: 'D'
+    };
+    return map[provider] || String(fallbackLabel || '?').slice(0, 1).toUpperCase();
+}
+
+function renderProviderBadge(provider, fallbackLabel) {
+    const shortLabel = getProviderShortLabelByKey(provider, fallbackLabel);
+    return `<span class="providerBadge provider-${escapeHtml(provider || 'unknown')}">${escapeHtml(shortLabel)}</span>`;
+}
+
 function getVisibleAccounts(accounts) {
     const visibleProviders = Object.entries(providerVisibility)
         .filter(([, info]) => info.visible)
@@ -314,11 +332,13 @@ function renderAccountCard(account) {
     const statusClass = account.status ? ` account-${escapeHtml(account.status)}` : '';
     const tip = getAccountTip(account);
     const tipBadge = tip ? renderTipBadge(tip) : '';
+    const providerBadge = renderProviderBadge(account.provider, account.label);
 
     return `
         <div class="accountCard${statusClass}">
             <div class="accountHead">
                 <span class="accountNameWrap">
+                    ${providerBadge}
                     <span class="accountName">${escapeHtml(account.label || account.provider || 'Account')}</span>
                     ${tipBadge}
                 </span>
@@ -463,6 +483,7 @@ function renderSessions(sessions) {
 }
 
 function renderIntervention(intervention) {
+    const hadPending = Boolean(pendingIntervention);
     pendingIntervention = intervention;
 
     if (!intervention) {
@@ -472,6 +493,9 @@ function renderIntervention(intervention) {
         if (currentData) {
             island.classList.remove('tone-neutral', 'tone-good', 'tone-warn', 'tone-danger');
             island.classList.add(getTone(currentData));
+        }
+        if (hadPending) {
+            collapseIsland();
         }
         return;
     }
@@ -550,6 +574,10 @@ function renderInterventionCommand(command) {
 function renderDetailText(intervention) {
     if (!intervention) {
         return '--';
+    }
+
+    if (intervention.reason) {
+        return compactText(intervention.reason, 120);
     }
 
     if (intervention.command && intervention.detail === intervention.command) {
@@ -763,6 +791,7 @@ function renderProviderToggles() {
         return `
             <div class="providerToggle" data-provider="${escapeHtml(key)}">
                 <span class="providerToggleLabel">
+                    ${renderProviderBadge(key, info.label)}
                     ${escapeHtml(info.label)}
                     ${renderTipBadge(tip)}
                 </span>

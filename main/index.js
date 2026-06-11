@@ -485,6 +485,9 @@ function respondToIntervention(decision) {
   }
 
   interventionManager.respond(decision);
+  if (!interventionManager.getPending()) {
+    setIslandMode('pill');
+  }
   broadcastSummary();
   return true;
 }
