@@ -1,84 +1,129 @@
 # ThatIsOk
 
-AI agent cost + approval cockpit. Floating island on top of macOS, hooks into Claude Code / Codex / OpenCode for permission approvals, syncs usage from Anthropic / OpenAI / Codex admin APIs.
+ThatIsOk is a local desktop approval and usage cockpit for AI coding tools. It keeps a small floating island on screen for permission decisions, tracks provider usage across local agents, and exposes a local API for dashboards or integrations.
 
-## Features
+## Why it exists
 
-- **Approval bridge** — pipes `PermissionRequest` and `PreToolUse` from Claude/Codex hooks to a floating island; approve / always / deny without leaving the keyboard
-- **Multi-agent support** — Claude Code, Codex
-- **Full hook lifecycle** — SessionStart, Stop, PreToolUse, PostToolUse, UserPromptSubmit, PermissionRequest
-- **Multi-account usage sync** — Anthropic, OpenAI admin, DeepSeek, Codex local JWT, Claude JSONL transcripts
-- **Island UI** — top-center pill → expands to dashboard (balance, today, month, runway, accounts)
-- **System notifications** — get notified when permission is needed, even when island is hidden
-- **Keyboard shortcuts** — `Cmd+Shift+Space` toggle, `Cmd+Shift+A` approve, `Cmd+Shift+D` deny
-- **Local HTTP API** — other apps can read usage data from `127.0.0.1:45874`
-- **Local-first** — all data in `electron-store`, no server, no telemetry
+- Keep approval prompts visible without alt-tabbing back to the terminal
+- Track usage and balance across multiple coding agents and providers in one place
+- Expose local state through a simple HTTP API
+- Store everything locally with no telemetry
 
-## Architecture
+## Highlights
 
-```
-ThatIsOk/
-├── main/                Electron main process
-│   ├── index.js         app boot, IPC, sync timer, global shortcuts
-│   ├── watcher.js       hook event router
-│   ├── intervention-manager.js   approval queue + notifications
-│   ├── ipc-server.js    local TCP bridge (127.0.0.1:45873)
-│   ├── local-api.js     HTTP API for usage data (127.0.0.1:45874)
-│   ├── config-injector.js  writes Claude/Codex hook config
-│   ├── providers/       anthropic / openai / local-codex adapters
-│   ├── services/        sync / forecast / local-codex JWT / local-claude
-│   └── storage/         electron-store wrapper
-├── bridge/              standalone hook bridge CLI (Node)
-├── renderer/            island UI (HTML + CSS + JS)
-├── bin/cli.js           `ok` command launcher
-└── config/              providers / models / defaults (JSON)
-```
+- Floating always-on-top approval island with compact and expanded modes
+- Approve, approve always, or deny with global shortcuts
+- Hook bridge support for Claude Code, Codex, and Gemini
+- Usage and balance sync for Codex, Claude Code, Cursor, MiniMax, Gemini, and DeepSeek
+- Tray integration, session tracking, provider visibility toggles, and local-only persistence
 
-## Run
+## Platform status
+
+- Primary target: Windows
+- Also supported: macOS
+- Default runtime: Electron
+- `src-tauri/` is present, but Electron is the active desktop runtime today
+
+## Supported agents and providers
+
+### Approval / hook support
+
+| Agent | Status |
+| --- | --- |
+| Claude Code | Supported |
+| Codex | Supported |
+| Gemini | Supported |
+
+### Usage / balance sync
+
+| Provider | Source |
+| --- | --- |
+| Codex | local auth and session data |
+| Claude Code | local JSONL transcripts |
+| Cursor | local app storage |
+| MiniMax | local and API-backed usage fetch |
+| Gemini | local login and session data |
+| DeepSeek | API balance |
+
+## Quick start
 
 ```bash
 npm install
 npm start
 ```
 
-The `ok` command launches the app:
+Alternative launcher:
 
 ```bash
-./bin/cli.js
+node bin/cli.js
 ```
 
-On first run, `ConfigInjector` writes hooks into `~/.claude/settings.json` and `~/.codex/hooks.json`. Remove those entries to uninstall the bridge.
+## Build
 
-## Supported Agents
+```bash
+npm run build
+npm run build:win
+npm run build:mac
+```
 
-| Agent | Hook Events | Approval Flow | Usage Tracking |
-|-------|-------------|---------------|----------------|
-| Claude Code | SessionStart, Stop, PreToolUse, PostToolUse, UserPromptSubmit, PermissionRequest | Yes | Local JSONL transcripts |
-| Codex | SessionStart, Stop, PreToolUse, PostToolUse, UserPromptSubmit | Yes | auth.json JWT decode |
-| DeepSeek | Via local API | Yes | auth.json JWT decode |
+Tauri commands are also available:
 
-## Keyboard Shortcuts
+```bash
+npm run tauri:dev
+npm run tauri:build
+```
 
-| Shortcut | Action |
-|----------|--------|
-| `Cmd/Ctrl+Shift+Space` | Toggle island visibility |
-| `Cmd/Ctrl+Shift+A` | Approve current permission request |
-| `Cmd/Ctrl+Shift+L` | Approve always (auto-approve same requests) |
-| `Cmd/Ctrl+Shift+D` | Deny current permission request |
+## Global shortcuts
 
-> Shortcuts work on both macOS and Windows (Electron's `CommandOrControl`)
+- `Ctrl/Cmd+Shift+Space`: toggle island
+- `Ctrl/Cmd+Shift+A`: approve
+- `Ctrl/Cmd+Shift+L`: approve always
+- `Ctrl/Cmd+Shift+D`: deny
 
-## Local HTTP API
+## Local API
 
-Usage data is available at `http://127.0.0.1:45874`:
+Base URL: `http://127.0.0.1:45874`
 
 | Endpoint | Description |
-|----------|-------------|
-| `GET /api/health` | Health check |
-| `GET /api/usage` | Full dashboard data |
-| `GET /api/overview` | Balance, costs, runway |
-| `GET /api/accounts` | Account list with balances |
-| `GET /api/intervention` | Current pending permission request |
+| --- | --- |
+| `GET /api/health` | health check |
+| `GET /api/usage` | full dashboard payload |
+| `GET /api/overview` | total balance, today, month, runway |
+| `GET /api/accounts` | provider/account list |
+| `GET /api/intervention` | current pending approval request |
+
+## Project layout
+
+```text
+ThatIsOk/
+|- main/         Electron main process
+|- renderer/     floating island UI and dashboard
+|- bridge/       standalone hook bridge CLI
+|- shared/       hook normalization and IPC config
+|- config/       providers, defaults, models
+|- bin/          helper scripts and CLI entry
+`- src-tauri/    Tauri 2 workspace
+```
+
+## Hook installation
+
+On startup, the app injects managed hook entries into:
+
+- `~/.claude/settings.json`
+- `~/.codex/hooks.json`
+- `~/.gemini/settings.json`
+
+These managed entries point to `bridge/hook-bridge.js`.
+
+## Notes
+
+- Data is stored locally with `electron-store`
+- The bridge uses local IPC over `127.0.0.1:45873` or a Windows named pipe
+- `npm run test:hook` is the main hook smoke test today
+
+## Docs
+
+- Chinese README: [README.zh-CN.md](./README.zh-CN.md)
 
 ## License
 
