@@ -1041,45 +1041,40 @@ async fn fetch_codex_snapshot(
 
     let effective_stale = is_stale && usage_data.is_none();
 
-    let mut lines = Vec::new();
-    if let Some(ref data) = usage_data {
-        if let Some(rate_limit) = data.get("rate_limit") {
-            if let Some(primary) = rate_limit.get("primary_window") {
-                let used = primary.get("used_percent").and_then(Value::as_f64).unwrap_or(0.0);
-                let pct = (used * 100.0).round().clamp(0.0, 100.0);
-                lines.push(json!({
-                    "type": "progress",
-                    "label": "Codex",
-                    "used": pct,
-                    "limit": 100.0,
-                    "format": { "kind": "percent" },
-                    "subtitle": format!("{}% used", pct.round())
-                }));
-            }
-        }
-    }
+    // Codex doesn't generate progress lines — usage data is rate-limit info.
+    // The Electron version only stores raw usage; no progress bars.
 
-    Some(json!({
+    let message = usage_error.unwrap_or_else(|| format!("plan {display_plan}"));
+    let status = if effective_stale { "stale" } else { "live-local" };
+    let plan = if effective_stale { "Codex auth stale" } else { &display_plan };
+    let source = usage_data
+        .as_ref()
+        .and_then(|d| d.get("source"))
+        .and_then(Value::as_str)
+        .unwrap_or("local_auth");
+
+    let snapshot = json!({
         "accountId": account_id,
         "provider": "codex",
         "label": label,
         "balanceUsd": null,
         "creditTotalUsd": null,
         "creditUsedUsd": null,
-        "status": if effective_stale { "stale" } else { "live-local" },
+        "status": status,
         "capturedAt": now_millis(),
-        "source": usage_data.as_ref().and_then(|d| d.get("source")).and_then(Value::as_str).unwrap_or("local_auth"),
-        "plan": if effective_stale { "Codex auth stale" } else { &display_plan },
+        "source": source,
+        "plan": plan,
         "usage": usage_data,
-        "lines": lines,
+        "lines": json!([]),
         "meta": {
             "planType": plan_type,
             "displayPlan": display_plan,
             "isStale": effective_stale,
             "lastRefresh": last_refresh,
         },
-        "message": if let Some(err) = usage_error { err } else { format!("plan {display_plan}") }
-    }))
+        "message": message
+    });
+    Some(snapshot)
 }
 
 async fn fetch_codex_usage_api(
@@ -1119,7 +1114,7 @@ fn read_codex_session_usage(home: &Path) -> Option<Value> {
     let primary = limits
         .get("primary")
         .and_then(|p| {
-            Some(json!({
+    Some::<Value>(json!({
                 "used_percent": p.get("used_percent").or_else(|| p.get("usedPercent")).and_then(Value::as_f64).unwrap_or(0.0),
                 "resets_at": p.get("resets_at").or_else(|| p.get("reset_at")).or_else(|| p.get("resetAt")).and_then(Value::as_str),
                 "window_minutes": p.get("window_minutes").or_else(|| p.get("windowMinutes")).and_then(Value::as_f64),
@@ -2907,7 +2902,7 @@ pub fn run() {
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .map_err(|e| format!("tray icon: {e}")).ok();
             if let Some(icon) = tray_icon {
-                let open = MenuItemBuilder::with_id("open", "Open Dashboard")
+                let open = MenuItemBuilder::with_id("open", "Open")
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let sync_item = MenuItemBuilder::with_id("sync", "Sync Now")

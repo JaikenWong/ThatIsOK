@@ -7,7 +7,7 @@ module.exports = function createTray({ icon, onOpenDashboard, onRefresh, onQuit 
   function updateSummary() {
     const contextMenu = Menu.buildFromTemplate([
       {
-        label: 'Open Dashboard',
+        label: 'Open',
         click: onOpenDashboard
       },
       {

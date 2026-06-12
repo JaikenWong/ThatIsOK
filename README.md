@@ -21,8 +21,8 @@ ThatIsOk is a local desktop approval and usage cockpit for AI coding tools. It k
 
 - Primary target: Windows
 - Also supported: macOS
-- Default runtime: Electron
-- `src-tauri/` is present, but Electron is the active desktop runtime today
+- Active desktop runtime: Tauri 2
+- Legacy Electron implementation is still present in `main/` and `bin/`, but is no longer the primary path
 
 ## Supported agents and providers
 
@@ -49,10 +49,10 @@ ThatIsOk is a local desktop approval and usage cockpit for AI coding tools. It k
 
 ```bash
 npm install
-npm start
+npm run tauri:dev
 ```
 
-Alternative launcher:
+Legacy Electron launcher:
 
 ```bash
 node bin/cli.js
@@ -61,17 +61,10 @@ node bin/cli.js
 ## Build
 
 ```bash
-npm run build
-npm run build:win
-npm run build:mac
-```
-
-Tauri commands are also available:
-
-```bash
-npm run tauri:dev
 npm run tauri:build
 ```
+
+Legacy Electron packaging is still available through `npm run build`, `npm run build:win`, and `npm run build:mac`.
 
 ## Global shortcuts
 
@@ -96,13 +89,13 @@ Base URL: `http://127.0.0.1:45874`
 
 ```text
 ThatIsOk/
-|- main/         Electron main process
-|- renderer/     floating island UI and dashboard
-|- bridge/       standalone hook bridge CLI
+|- src-tauri/    active Tauri 2 app runtime and backend
+|- renderer/     floating island UI loaded by Tauri webview
+|- main/         legacy Electron main process
+|- bridge/       legacy standalone hook bridge CLI
 |- shared/       hook normalization and IPC config
 |- config/       providers, defaults, models
-|- bin/          helper scripts and CLI entry
-`- src-tauri/    Tauri 2 workspace
+`- bin/          helper scripts and legacy CLI entry
 ```
 
 ## Hook installation
@@ -111,15 +104,16 @@ On startup, the app injects managed hook entries into:
 
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
-- `~/.gemini/settings.json`
 
-These managed entries point to `bridge/hook-bridge.js`.
+Managed entries now point to the packaged ThatIsOk executable with `--hook-source` and `--hook-event`.
+`bridge/hook-bridge.js` remains only for the legacy Electron path and old smoke tests.
 
 ## Notes
 
-- Data is stored locally with `electron-store`
-- The bridge uses local IPC over `127.0.0.1:45873` or a Windows named pipe
-- `npm run test:hook` is the main hook smoke test today
+- Current runtime state and sync logic live in `src-tauri/src/lib.rs`
+- Local hook IPC still uses `127.0.0.1:45873` or a Windows named pipe
+- `renderer/dashboard/` was removed because it was no longer wired to either runtime
+- `npm run test:hook` still exercises the legacy bridge path
 
 ## Docs
 
