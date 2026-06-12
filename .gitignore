@@ -10,3 +10,4 @@ out/
 .vscode/
 *.tsbuildinfo
 coverage/
+assets/icon.iconset/

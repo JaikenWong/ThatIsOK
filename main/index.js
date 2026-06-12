@@ -1,7 +1,8 @@
 const { app, BrowserWindow, ipcMain, nativeImage, screen, globalShortcut } = require('electron');
+const fs = require('fs');
 const path = require('path');
 
-const { loadEnvFile } = require('./env-loader');
+const { loadEnvironment } = require('./env-loader');
 const Watcher = require('./watcher');
 const SessionStore = require('./session-store');
 const UsageStore = require('./storage/usage-store');
@@ -12,12 +13,11 @@ const SyncService = require('./services/sync-service');
 const InterventionManager = require('./intervention-manager');
 const { LocalAPI } = require('./local-api');
 
-loadEnvFile();
-
 // Windows taskbar icon requires AUMI set before app is ready
 if (process.platform === 'win32') {
   app.setAppUserModelId('com.thatisok.app');
 }
+app.disableHardwareAcceleration();
 
 let islandWindow;
 let trayController;
@@ -45,6 +45,36 @@ const WINDOW_SIZES = {
 const WINDOW_MARGIN = 12;
 const APP_ICON_PATH = path.join(__dirname, '..', 'assets', 'icon.png');
 const TRAY_ICON_PATH = path.join(__dirname, '..', 'assets', 'icon-16.png');
+
+function installHookRuntime() {
+  const runtimeRoot = path.join(app.getPath('userData'), 'hook-runtime');
+  const bridgeDir = path.join(runtimeRoot, 'bridge');
+  const sharedDir = path.join(runtimeRoot, 'shared');
+  const sourceRoot = getHookRuntimeSourceRoot();
+  fs.mkdirSync(bridgeDir, { recursive: true });
+  fs.mkdirSync(sharedDir, { recursive: true });
+
+  fs.copyFileSync(
+    path.join(sourceRoot, 'bridge', 'hook-bridge.js'),
+    path.join(bridgeDir, 'hook-bridge.js')
+  );
+  fs.copyFileSync(
+    path.join(sourceRoot, 'shared', 'ipc-config.js'),
+    path.join(sharedDir, 'ipc-config.js')
+  );
+
+  return path.join(bridgeDir, 'hook-bridge.js');
+}
+
+function getHookRuntimeSourceRoot() {
+  const unpackedRoot = process.resourcesPath
+    ? path.join(process.resourcesPath, 'app.asar.unpacked')
+    : null;
+  if (unpackedRoot && fs.existsSync(path.join(unpackedRoot, 'bridge', 'hook-bridge.js'))) {
+    return unpackedRoot;
+  }
+  return path.join(__dirname, '..');
+}
 
 function getTopCenterBounds(size) {
   const display = screen.getPrimaryDisplay();
@@ -369,6 +399,7 @@ function setupBridgeServer() {
 }
 
 async function createApp() {
+  loadEnvironment(app);
   sessionStore = new SessionStore();
   usageStore = new UsageStore();
   watcher = new Watcher(usageStore);
@@ -408,6 +439,7 @@ async function createApp() {
   setupIPC();
   setupBridgeServer();
   ConfigInjector.setAppPath(app.getAppPath());
+  ConfigInjector.setBridgePath(installHookRuntime());
   ConfigInjector.injectClaude();
   ConfigInjector.injectCodex();
   ConfigInjector.injectGemini();
@@ -461,11 +493,8 @@ function registerGlobalShortcuts() {
   });
 
   registerDecisionShortcut('CommandOrControl+Alt+A', 'approve');
-  registerDecisionShortcut('CommandOrControl+Shift+A', 'approve');
   registerDecisionShortcut('CommandOrControl+Alt+L', 'approve_always');
-  registerDecisionShortcut('CommandOrControl+Shift+L', 'approve_always');
   registerDecisionShortcut('CommandOrControl+Alt+D', 'deny');
-  registerDecisionShortcut('CommandOrControl+Shift+D', 'deny');
 }
 
 function registerShortcut(accelerator, callback) {

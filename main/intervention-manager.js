@@ -1,7 +1,15 @@
 const { Notification } = require('electron');
+const ElectronStore = require('electron-store');
+
+const Store = ElectronStore.default || ElectronStore;
 
 class InterventionManager {
     constructor() {
+        this.store = new Store({
+            projectName: 'thatisok',
+            name: 'thatisok-interventions'
+        });
+        this.persistentApprovals = this.store.get('persistent_approvals', {});
         this.pending = null;
         this.queue = [];
         this.onChange = null;
@@ -32,11 +40,24 @@ class InterventionManager {
                 command: request.command || '',
                 filePath: request.filePath || '',
                 toolName: request.toolName || 'permission',
+                actionKind: request.actionKind || '',
+                sandbox: request.sandbox || '',
+                prefixRule: request.prefixRule || '',
                 raw: request.raw || '',
                 meta: request.meta || {},
                 createdAt: Date.now(),
                 resolve
             };
+
+            if (this.isPersistentlyApproved(entry)) {
+                resolve({
+                    approved: true,
+                    decision: 'approve_always',
+                    allowPersistent: true,
+                    persisted: true
+                });
+                return;
+            }
 
             if (this.pending) {
                 this.queue.push(entry);
@@ -108,6 +129,9 @@ class InterventionManager {
         const current = this.pending;
         this.pending = null;
         const approved = decision === 'approve' || decision === 'approve_always';
+        if (approved && decision === 'approve_always') {
+            this.persistApproval(current);
+        }
         current.resolve({
             approved,
             decision,
@@ -125,6 +149,67 @@ class InterventionManager {
         if (typeof this.onChange === 'function') {
             this.onChange(this.getPending());
         }
+    }
+
+    isPersistentlyApproved(entry) {
+        const key = this.getApprovalKey(entry);
+        return Boolean(key && this.persistentApprovals[key]);
+    }
+
+    persistApproval(entry) {
+        const key = this.getApprovalKey(entry);
+        if (!key) {
+            return;
+        }
+
+        this.persistentApprovals[key] = {
+            source: entry.source,
+            toolName: entry.toolName,
+            prefixRule: entry.prefixRule || '',
+            command: entry.prefixRule ? '' : entry.command || '',
+            createdAt: Date.now()
+        };
+        this.store.set('persistent_approvals', this.persistentApprovals);
+    }
+
+    getApprovalKey(entry) {
+        if (!entry || !entry.source) {
+            return null;
+        }
+
+        const toolName = String(entry.toolName || 'permission').toLowerCase();
+        if (entry.prefixRule) {
+            return [
+                entry.source,
+                toolName,
+                'prefix',
+                this.normalizeApprovalText(entry.prefixRule)
+            ].join('|');
+        }
+
+        if (entry.command) {
+            return [
+                entry.source,
+                toolName,
+                'command',
+                this.normalizeApprovalText(entry.command)
+            ].join('|');
+        }
+
+        if (entry.filePath) {
+            return [
+                entry.source,
+                toolName,
+                'file',
+                this.normalizeApprovalText(entry.filePath)
+            ].join('|');
+        }
+
+        return null;
+    }
+
+    normalizeApprovalText(value) {
+        return String(value || '').trim().replace(/\s+/g, ' ');
     }
 }
 

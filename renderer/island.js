@@ -1,4 +1,5 @@
-const { ipcRenderer } = require('electron');
+const ipcRenderer = createIpcRendererAdapter();
+const appPlatform = getAppPlatform();
 
 const island = document.getElementById('island');
 const pillContent = document.getElementById('pillContent');
@@ -36,6 +37,7 @@ const PROVIDER_SETUP_TIPS = {
 
 let currentData = null;
 let pendingIntervention = null;
+let respondingInterventionId = null;
 let providerVisibility = {};
 let dragging = false;
 let suppressClickUntil = 0;
@@ -68,6 +70,70 @@ function collapseIsland() {
     island.classList.add('pill');
     expandedContent.classList.add('hidden');
     ipcRenderer.send('island:set-mode', 'pill');
+}
+
+function createIpcRendererAdapter() {
+    if (typeof require === 'function') {
+        try {
+            const electron = require('electron');
+            if (electron && electron.ipcRenderer) {
+                return electron.ipcRenderer;
+            }
+        } catch (_err) {
+            // Fall through to Tauri adapter.
+        }
+    }
+
+    const tauri = window.__TAURI__;
+    if (!tauri || !tauri.core || !tauri.event) {
+        throw new Error('No supported IPC runtime found');
+    }
+
+    const invokeMap = {
+        'island:get-data': 'island_get_data',
+        'island:get-intervention': 'island_get_intervention',
+        'island:sync-now': 'island_sync_now',
+        'providers:get-visibility': 'providers_get_visibility'
+    };
+
+    const sendMap = {
+        'island:set-mode': (mode) => tauri.core.invoke('island_set_mode', { mode }),
+        'island:set-expanded-height': (height) => tauri.core.invoke('island_set_expanded_height', { height }),
+        'island:drag-start': (mouse) => tauri.core.invoke('island_drag_start', { mouse }),
+        'island:drag-move': (mouse) => tauri.core.invoke('island_drag_move', { mouse }),
+        'island:drag-end': () => tauri.core.invoke('island_drag_end'),
+        'intervention:respond': (decision) => tauri.core.invoke('intervention_respond', { decision }),
+        'providers:set-visibility': (provider, visible) => tauri.core.invoke('providers_set_visibility', { provider, visible })
+    };
+
+    return {
+        invoke(channel, ...args) {
+            const command = invokeMap[channel];
+            if (!command) {
+                return Promise.reject(new Error(`Unsupported invoke channel: ${channel}`));
+            }
+            return tauri.core.invoke(command, ...args);
+        },
+        send(channel, ...args) {
+            const sender = sendMap[channel];
+            if (!sender) {
+                console.warn(`Unsupported send channel: ${channel}`);
+                return;
+            }
+            sender(...args).catch((err) => console.error(`IPC send failed: ${channel}`, err));
+        },
+        on(channel, handler) {
+            tauri.event.listen(channel, (event) => handler({}, event.payload))
+                .catch((err) => console.error(`IPC listen failed: ${channel}`, err));
+        }
+    };
+}
+
+function getAppPlatform() {
+    if (typeof process !== 'undefined' && process.platform) {
+        return process.platform;
+    }
+    return navigator.platform.toLowerCase().includes('mac') ? 'darwin' : 'win32';
 }
 
 island.addEventListener('click', (event) => {
@@ -196,7 +262,7 @@ function getTone(data) {
 function renderSummary(data) {
     currentData = data;
     const visibleAccounts = getPrioritizedVisibleAccounts(data.accounts || []);
-    const progressAccounts = visibleAccounts.filter(hasProgressRing).slice(0, 5);
+    const progressAccounts = visibleAccounts.filter(hasPillIndicator).slice(0, 5);
     const primaryAccount = visibleAccounts[0];
 
     if (progressAccounts.length) {
@@ -237,6 +303,10 @@ function renderPillProgress(accounts) {
     primaryValue.classList.add('pillTextHidden');
     pillProgress.innerHTML = displayAccounts.map((account) => {
         const progressLine = getProgressLine(account);
+        if (!progressLine) {
+            return renderPillMeter(account, displayAccounts.length);
+        }
+
         const used = Number(progressLine.used || 0);
         const limit = Number(progressLine.limit || 0);
         const percent = Math.max(0, Math.min(100, limit > 0 ? (used / limit) * 100 : 0));
@@ -261,6 +331,19 @@ function renderPillProgress(accounts) {
     }).join('');
 }
 
+function renderPillMeter(account, count) {
+    const text = getPillMeterText(account);
+    const compact = compactPillText(text);
+    const fontSize = getPillMeterFontSize(compact, count);
+
+    return `
+        <div class="pillMeter" style="font-size:${fontSize}px">
+            <span class="pillMeterProvider">${escapeHtml(getProviderShortLabel(account))}</span>
+            <span class="pillMeterValue">${escapeHtml(compact)}</span>
+        </div>
+    `;
+}
+
 function hidePillProgress() {
     pillProgress.classList.add('hidden');
     pillContent.classList.remove('pillContent-rings', 'pillContent-rings-right', 'pillContent-rings-hidden');
@@ -273,10 +356,55 @@ function hasProgressRing(account) {
     return Boolean(getProgressLine(account));
 }
 
+function hasPillIndicator(account) {
+    return hasProgressRing(account) || Boolean(getPillMeterText(account));
+}
+
 function getProgressLine(account) {
     return Array.isArray(account.lines)
         ? account.lines.find((line) => line && line.type === 'progress' && Number(line.limit) > 0)
         : null;
+}
+
+function getPillMeterText(account) {
+    if (account?.usage && typeof account.usage.totalBalance === 'number') {
+        return formatMoney(account.usage.totalBalance, account.usage.currency);
+    }
+    if (typeof account?.balanceUsd === 'number' && !Number.isNaN(account.balanceUsd)) {
+        return formatUsd(account.balanceUsd);
+    }
+    return null;
+}
+
+function compactPillText(text) {
+    const raw = String(text || '');
+    const match = raw.match(/^([^0-9.-]*)(-?\d+(?:\.\d+)?)/);
+    if (!match) {
+        return raw.length > 7 ? raw.slice(0, 7) : raw;
+    }
+
+    const prefix = match[1] || '';
+    const value = Number(match[2]);
+    if (!Number.isFinite(value)) {
+        return raw;
+    }
+    if (Math.abs(value) >= 10000) {
+        return `${prefix}${Math.round(value / 1000)}k`;
+    }
+    if (Math.abs(value) >= 1000) {
+        return `${prefix}${(value / 1000).toFixed(1)}k`;
+    }
+    if (Math.abs(value) >= 100) {
+        return `${prefix}${Math.round(value)}`;
+    }
+    return `${prefix}${value.toFixed(1)}`;
+}
+
+function getPillMeterFontSize(text, count) {
+    const length = String(text || '').length;
+    if (count > 3 || length > 6) return 10;
+    if (length > 4) return 11;
+    return 12;
 }
 
 function getProviderShortLabel(account) {
@@ -718,6 +846,9 @@ ipcRenderer.on('island-force-expand', () => {
 });
 
 ipcRenderer.on('intervention-state', (_event, intervention) => {
+    if (!intervention) {
+        respondingInterventionId = null;
+    }
     renderIntervention(intervention);
 });
 
@@ -736,15 +867,15 @@ syncButton.addEventListener('click', async () => {
 });
 
 approveButton.addEventListener('click', () => {
-    ipcRenderer.send('intervention:respond', 'approve');
+    sendInterventionDecision('approve');
 });
 
 approveAlwaysButton.addEventListener('click', () => {
-    ipcRenderer.send('intervention:respond', 'approve_always');
+    sendInterventionDecision('approve_always');
 });
 
 denyButton.addEventListener('click', () => {
-    ipcRenderer.send('intervention:respond', 'deny');
+    sendInterventionDecision('deny');
 });
 
 window.addEventListener('keydown', (event) => {
@@ -753,26 +884,43 @@ window.addEventListener('keydown', (event) => {
     }
 
     const modifierPressed = event.ctrlKey || event.metaKey;
-    const actionModifierPressed = event.altKey || event.shiftKey;
+    const actionModifierPressed = event.altKey;
     if (!modifierPressed || !actionModifierPressed) {
         return;
     }
 
     const key = event.key.toLowerCase();
     if (key === 'a') {
-        ipcRenderer.send('intervention:respond', 'approve');
+        sendInterventionDecision('approve');
         event.preventDefault();
     } else if (key === 'l') {
-        ipcRenderer.send('intervention:respond', 'approve_always');
+        sendInterventionDecision('approve_always');
         event.preventDefault();
     } else if (key === 'd') {
-        ipcRenderer.send('intervention:respond', 'deny');
+        sendInterventionDecision('deny');
         event.preventDefault();
     }
 });
 
+function sendInterventionDecision(decision) {
+    if (!pendingIntervention) {
+        return;
+    }
+
+    const requestId = pendingIntervention.id || `${pendingIntervention.source}:${pendingIntervention.createdAt}`;
+    if (respondingInterventionId === requestId) {
+        return;
+    }
+
+    respondingInterventionId = requestId;
+    approveButton.disabled = true;
+    approveAlwaysButton.disabled = true;
+    denyButton.disabled = true;
+    ipcRenderer.send('intervention:respond', decision);
+}
+
 function renderShortcuts() {
-    const prefix = process.platform === 'darwin' ? 'Cmd Opt' : 'Ctrl Alt';
+    const prefix = appPlatform === 'darwin' ? 'Cmd Opt' : 'Ctrl Alt';
     approveShortcut.innerText = `${prefix} A`;
     alwaysShortcut.innerText = `${prefix} L`;
     denyShortcut.innerText = `${prefix} D`;

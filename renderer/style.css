@@ -141,6 +141,37 @@ body, html {
     font-size: 11px;
 }
 
+.pillMeter {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    min-width: 54px;
+    max-width: 88px;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 9px;
+    background: rgba(255, 255, 255, 0.08);
+    border: 1px solid rgba(92, 225, 160, 0.34);
+    color: rgba(255, 255, 255, 0.94);
+    font-weight: 750;
+    line-height: 1;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.pillMeterProvider {
+    font-size: 9px;
+    color: rgba(92, 225, 160, 0.94);
+    flex: 0 0 auto;
+}
+
+.pillMeterValue {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 #primaryLabel {
     display: inline-flex;
     align-items: center;

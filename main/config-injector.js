@@ -65,10 +65,17 @@ const MANAGED_KEY = 'ThatIsOk';
 
 class ConfigInjector {
     static appPath = process.cwd();
+    static bridgePath = null;
 
     static setAppPath(appPath) {
         if (appPath) {
             this.appPath = appPath;
+        }
+    }
+
+    static setBridgePath(bridgePath) {
+        if (bridgePath) {
+            this.bridgePath = bridgePath;
         }
     }
 
@@ -100,7 +107,7 @@ class ConfigInjector {
                 };
 
                 const filtered = existing.filter(
-                    (entry) => entry && entry._managedBy !== MANAGED_KEY
+                    (entry) => entry && entry._managedBy !== MANAGED_KEY && !this.isManagedClaudeHookValue(entry)
                 );
                 config.hooks[eventName] = [...filtered, managedEntry];
             }
@@ -137,7 +144,7 @@ class ConfigInjector {
                 };
 
                 const filtered = existing.filter(
-                    (entry) => entry && entry._managedBy !== managedKey
+                    (entry) => entry && entry._managedBy !== managedKey && !this.isManagedHookValue(entry)
                 );
                 config.hooks[eventName] = [...filtered, managedEntry];
             }
@@ -176,7 +183,7 @@ class ConfigInjector {
                 };
 
                 const filtered = existing.filter(
-                    (entry) => entry && entry._managedBy !== MANAGED_KEY
+                    (entry) => entry && entry._managedBy !== MANAGED_KEY && !this.isManagedHookValue(entry)
                 );
                 config.hooks[eventName] = [...filtered, managedEntry];
             }
@@ -266,6 +273,36 @@ class ConfigInjector {
     static isManagedCommand(command) {
         return typeof command === 'string'
             && (command.includes('ThatIsOk') || command.includes('hook-bridge.js'));
+    }
+
+    static isManagedHookValue(value) {
+        if (!value) {
+            return false;
+        }
+
+        if (typeof value === 'string') {
+            return this.isManagedCommand(value);
+        }
+
+        if (Array.isArray(value)) {
+            return value.some((entry) => this.isManagedHookValue(entry));
+        }
+
+        if (typeof value === 'object') {
+            if (value._managedBy === MANAGED_KEY) {
+                return true;
+            }
+
+            if (this.isManagedCommand(value.command)) {
+                return true;
+            }
+
+            if (Array.isArray(value.hooks)) {
+                return value.hooks.some((hook) => this.isManagedHookValue(hook));
+            }
+        }
+
+        return false;
     }
 
     static uninjectCodex() {
@@ -391,7 +428,7 @@ class ConfigInjector {
     }
 
     static buildBridgeCommand(source, eventName) {
-        const bridgePath = path.join(this.appPath, 'bridge', 'hook-bridge.js');
+        const bridgePath = this.bridgePath || path.join(this.appPath, 'bridge', 'hook-bridge.js');
         if (process.platform === 'win32') {
             const escaped = bridgePath.replace(/"/g, '\\"');
             return `node "${escaped}" --source ${source} --event ${eventName}`;

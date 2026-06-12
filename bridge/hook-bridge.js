@@ -84,7 +84,7 @@ function handlePermissionResponse(response) {
             ? buildClaudePermissionOutput(response)
             : buildCodexPermissionOutput(response);
         const exitCode = source === 'codex'
-            ? (response && response.approved ? 0 : 2)
+            ? 0
             : 0;
 
         process.stdout.write(`${JSON.stringify(output)}\n`, () => {
@@ -93,22 +93,21 @@ function handlePermissionResponse(response) {
         return;
     }
 
-    const exitCode = source === 'codex'
-        ? (response && response.approved ? 0 : 2)
-        : 0;
-    process.exit(exitCode);
+    process.exit(0);
 }
 
 function buildCodexPermissionOutput(response) {
     const output = {
-        behavior: response.approved ? 'allow' : 'deny'
+        hookSpecificOutput: {
+            hookEventName: 'PermissionRequest',
+            decision: {
+                behavior: response.approved ? 'allow' : 'deny'
+            }
+        }
     };
 
-    if (response.allowPersistent) {
-        output.allow_persistent = true;
-    }
     if (!response.approved) {
-        output.message = 'Denied from ThatIsOk';
+        output.hookSpecificOutput.decision.message = 'Denied from ThatIsOk';
     }
 
     return output;
