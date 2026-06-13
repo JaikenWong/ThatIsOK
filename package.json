@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "description": "Local approval and usage cockpit for Claude Code, Codex, Gemini, Cursor, MiniMax, and DeepSeek",
   "scripts": {
+    "tauri": "tauri",
     "tauri:dev": "tauri dev",
     "tauri:build": "tauri build",
     "test": "echo \"No test suite configured\""
