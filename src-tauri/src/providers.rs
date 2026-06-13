@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use crate::codex_provider::fetch_codex_snapshot;
 use crate::cursor_provider::fetch_cursor_snapshot;
-use crate::local_providers::{fetch_claude_snapshot, fetch_gemini_snapshot};
+use crate::local_providers::{fetch_claude_snapshot, fetch_gemini_snapshot, fetch_kiro_snapshot};
 use crate::remote_providers::{fetch_deepseek_snapshot, fetch_minimax_snapshot};
 use crate::{
     build_config_account, build_config_accounts, fetch_opencode_snapshot, read_json_file,
@@ -73,12 +73,19 @@ pub(crate) fn get_dashboard_data(state: &AppState) -> Value {
         })
         .unwrap_or_default();
 
+    let synced_at = state
+        .usage
+        .lock()
+        .map(|usage| usage.synced_at)
+        .unwrap_or(0);
+
     json!({
         "overview": overview,
         "accounts": accounts,
         "dailySeries": [],
         "recentEvents": [],
-        "sessions": sessions
+        "sessions": sessions,
+        "syncedAt": synced_at
     })
 }
 
@@ -100,10 +107,14 @@ pub(crate) async fn sync_provider_accounts() -> Vec<Value> {
     };
 
     let mut snapshots = Vec::new();
+    let visibility = provider_visibility();
     for account in accounts {
         let Some(provider) = account.get("provider").and_then(Value::as_str) else {
             continue;
         };
+        if !visibility.get(provider).map(|v| v.visible).unwrap_or(true) {
+            continue;
+        }
         let account_id = account
             .get("id")
             .and_then(Value::as_str)
@@ -123,6 +134,7 @@ pub(crate) async fn sync_provider_accounts() -> Vec<Value> {
             "cursor" => fetch_cursor_snapshot(&client, account_id, label).await,
             "gemini" => fetch_gemini_snapshot(account_id, label),
             "opencode" => fetch_opencode_snapshot(&client, account_id, label).await,
+            "kiro" => fetch_kiro_snapshot(account_id, label),
             _ => None,
         }
         .unwrap_or_else(|| build_config_account(&account, setting));

@@ -94,6 +94,7 @@ struct WindowBounds {
 #[derive(Default)]
 struct UsageState {
     balances: Vec<Value>,
+    synced_at: u128,
 }
 
 struct SyncState {
@@ -1341,6 +1342,7 @@ fn replace_usage_balances(app: &AppHandle, accounts: Vec<Value>) -> bool {
     match lock_result {
         Ok(mut usage) => {
             usage.balances = accounts;
+            usage.synced_at = now_millis();
             true
         }
         Err(error) => {

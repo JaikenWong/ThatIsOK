@@ -434,3 +434,128 @@ fn read_gemini_today_stats(gemini_dir: &Path) -> GeminiTodayStats {
 
     stats
 }
+
+pub(crate) fn fetch_kiro_snapshot(account_id: &str, label: &str) -> Option<Value> {
+    let home = dirs::home_dir()?;
+    let db_path = home
+        .join("Library")
+        .join("Application Support")
+        .join("Kiro")
+        .join("User")
+        .join("globalStorage")
+        .join("state.vscdb");
+    if !db_path.exists() {
+        return None;
+    }
+
+    let conn = rusqlite::Connection::open(&db_path).ok()?;
+    let mut stmt = conn
+        .prepare("SELECT value FROM ItemTable WHERE key = 'kiro.kiroAgent' LIMIT 1")
+        .ok()?;
+    let raw: Option<String> = stmt
+        .query_row([], |row| row.get(0))
+        .ok();
+    drop(stmt);
+    drop(conn);
+
+    let raw = raw?;
+    let state: Value = serde_json::from_str(&raw).ok()?;
+    let usage_state = state
+        .get("kiro.resourceNotifications.usageState")?;
+    let breakdowns = usage_state
+        .get("usageBreakdowns")
+        .and_then(Value::as_array)?;
+
+    let primary = breakdowns.iter().find(|b| {
+        b.get("type")
+            .or_else(|| b.get("resourceType"))
+            .and_then(Value::as_str)
+            == Some("CREDIT")
+    }).or_else(|| breakdowns.first())?;
+
+    let used = primary
+        .get("currentUsageWithPrecision")
+        .or_else(|| primary.get("currentUsage"))
+        .and_then(crate::read_number_value)
+        .unwrap_or(0.0);
+    let limit = primary
+        .get("usageLimitWithPrecision")
+        .or_else(|| primary.get("usageLimit"))
+        .and_then(crate::read_number_value)
+        .unwrap_or(0.0);
+    let reset_at = primary
+        .get("resetDate")
+        .or_else(|| primary.get("nextDateReset"))
+        .or_else(|| primary.get("resetAt"))
+        .and_then(Value::as_str)
+        .map(String::from);
+
+    if limit <= 0.0 {
+        return None;
+    }
+
+    let remaining = (limit - used).max(0.0);
+    let mut lines = Vec::new();
+    let mut progress = json!({
+        "type": "progress",
+        "label": "Credits",
+        "used": remaining,
+        "limit": limit,
+        "format": { "kind": "count", "mode": "remaining", "suffix": "credits" },
+        "subtitle": format!("{} left of {}", remaining.round(), limit.round())
+    });
+    if let Some(ref r) = reset_at {
+        progress["resetsAt"] = json!(r);
+    }
+    lines.push(progress);
+
+    let bonus = primary.get("freeTrialInfo").or_else(|| primary.get("freeTrialUsage"));
+    if let Some(b) = bonus {
+        let b_used = b
+            .get("currentUsageWithPrecision")
+            .or_else(|| b.get("currentUsage"))
+            .and_then(crate::read_number_value)
+            .unwrap_or(0.0);
+        let b_limit = b
+            .get("usageLimitWithPrecision")
+            .or_else(|| b.get("usageLimit"))
+            .and_then(crate::read_number_value)
+            .unwrap_or(0.0);
+        if b_limit > 0.0 {
+            let b_remaining = (b_limit - b_used).max(0.0);
+            lines.push(json!({
+                "type": "progress",
+                "label": "Bonus Credits",
+                "used": b_remaining,
+                "limit": b_limit,
+                "format": { "kind": "count", "mode": "remaining", "suffix": "credits" },
+                "subtitle": format!("{} left of {}", b_remaining.round(), b_limit.round())
+            }));
+        }
+    }
+
+    let timestamp = usage_state.get("timestamp").and_then(Value::as_i64).unwrap_or(0);
+    let plan = state
+        .get("subscriptionInfo")
+        .and_then(|s| s.get("subscriptionTitle"))
+        .and_then(Value::as_str)
+        .map(|s| s.to_string());
+
+    Some(json!({
+        "accountId": account_id,
+        "provider": "kiro",
+        "label": label,
+        "balanceUsd": null,
+        "creditTotalUsd": limit,
+        "creditUsedUsd": used,
+        "status": "live-local",
+        "capturedAt": timestamp.max(0) as u128,
+        "source": "local_db",
+        "plan": plan.unwrap_or_else(|| "Kiro".to_string()),
+        "lines": lines,
+        "meta": {
+            "timestamp": timestamp,
+            "hasBonus": bonus.is_some()
+        }
+    }))
+}

@@ -11,7 +11,6 @@ const pillProgress = document.getElementById('pillProgress');
 const sessionsList = document.getElementById('sessionsList');
 const accountsList = document.getElementById('accountsList');
 const syncButton = document.getElementById('syncButton');
-const settingsPanel = document.getElementById('settingsPanel');
 const syncIntervalDown = document.getElementById('syncIntervalDown');
 const syncIntervalUp = document.getElementById('syncIntervalUp');
 const syncIntervalValue = document.getElementById('syncIntervalValue');
@@ -39,7 +38,8 @@ const PROVIDER_SETUP_TIPS = {
     minimax: 'Requires MiniMax local login before plan usage can be synced.',
     gemini: 'Requires Gemini local login before usage can be synced.',
     deepseek: 'Requires DEEPSEEK_API_KEY in project .env or environment, then restart.',
-    opencode: 'Install ThatIsOK plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.'
+    opencode: 'Install ThatIsOK plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.',
+    kiro: 'Requires Kiro (Amazon Q) installed and signed in. Open Kiro dashboard once to populate usage data.'
 };
 
 let currentData = null;
@@ -61,7 +61,7 @@ let runtimeWarningTimer = null;
 let settingsState = { syncIntervalMinutes: 10 };
 const DRAG_THRESHOLD = 8;
 const SYNC_INTERVAL_STEPS = [5, 10, 15, 30, 60];
-const knownProviderOrder = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'minimax', 'opencode'];
+const knownProviderOrder = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'kiro', 'minimax', 'opencode'];
 
 function expandIsland() {
     island.classList.remove('pill');
@@ -204,10 +204,16 @@ island.addEventListener('click', (event) => {
 });
 
 document.getElementById('pillContent').addEventListener('mousedown', (event) => {
-    if (!island.classList.contains('pill')) {
-        return;
-    }
+    dragPointerDown = { x: event.screenX, y: event.screenY };
+    dragStarted = false;
+});
 
+document.getElementById('island').addEventListener('mousedown', (event) => {
+    if (!island.classList.contains('expanded')) return;
+    if (event.target.tagName === 'BUTTON') return;
+    if (event.target.closest('.providerToggle')) return;
+    if (event.target.closest('.tipBadge')) return;
+    if (event.target.closest('.settingsStepper')) return;
     dragPointerDown = { x: event.screenX, y: event.screenY };
     dragStarted = false;
 });
@@ -327,6 +333,7 @@ function renderSummary(data) {
     }
     renderSessions(data.sessions || []);
     renderAccounts(data.accounts || [], false);
+    renderSyncedAt(data.syncedAt);
     updateCompactVisibility();
 
     island.classList.remove('tone-neutral', 'tone-good', 'tone-warn', 'tone-danger');
@@ -522,7 +529,8 @@ function getProviderShortLabel(account) {
         minimax: 'M',
         cursor: 'R',
         deepseek: 'D',
-        opencode: 'O'
+        opencode: 'O',
+        kiro: 'K'
     };
     return map[account.provider] || String(account.label || '?').slice(0, 1).toUpperCase();
 }
@@ -535,7 +543,8 @@ function getProviderShortLabelByKey(provider, fallbackLabel = '?') {
         minimax: 'M',
         cursor: 'R',
         deepseek: 'D',
-        opencode: 'O'
+        opencode: 'O',
+        kiro: 'K'
     };
     return map[provider] || String(fallbackLabel || '?').slice(0, 1).toUpperCase();
 }
@@ -867,7 +876,6 @@ function updateCompactVisibility() {
     sessionsList.classList.toggle('hidden', compact || !sessionsList.innerHTML);
     accountsList.classList.toggle('compactHidden', compact);
     syncButton.classList.toggle('compactHidden', compact);
-    settingsPanel.classList.toggle('compactHidden', compact);
 }
 
 function scheduleExpandedHeightSync() {
@@ -1311,4 +1319,18 @@ function loadVersion() {
             }).catch(() => {});
         }
     } catch (_) {}
+}
+
+function renderSyncedAt(syncedAt) {
+    const el = document.getElementById('syncedAt');
+    if (!el) return;
+    if (!syncedAt || syncedAt === 0) {
+        el.textContent = '';
+        return;
+    }
+    const d = new Date(syncedAt);
+    const hh = String(d.getHours()).padStart(2, '0');
+    const mm = String(d.getMinutes()).padStart(2, '0');
+    const ss = String(d.getSeconds()).padStart(2, '0');
+    el.textContent = `Synced ${hh}:${mm}:${ss}`;
 }

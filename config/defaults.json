@@ -33,6 +33,10 @@
     "opencode": {
       "visible": true,
       "label": "OpenCode"
+    },
+    "kiro": {
+      "visible": false,
+      "label": "Kiro"
     }
   }
 }

@@ -27,6 +27,10 @@
     "opencode": {
       "name": "OpenCode",
       "currency": "USD"
+    },
+    "kiro": {
+      "name": "Kiro",
+      "currency": "USD"
     }
   },
   "accounts": [
@@ -71,6 +75,12 @@
       "provider": "opencode",
       "label": "OpenCode",
       "billingMode": "zen_plan"
+    },
+    {
+      "id": "kiro-local",
+      "provider": "kiro",
+      "label": "Kiro",
+      "billingMode": "subscription"
     }
   ]
 }
