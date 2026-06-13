@@ -52,6 +52,7 @@ let dragPointerDown = null;
 let dragStarted = false;
 let heightSyncFrame = null;
 let lastExpandedHeight = 0;
+let lastPillWidth = 0;
 let heightSyncDebounce = null;
 let pendingDragMove = null;
 let dragMoveFrame = null;
@@ -147,7 +148,8 @@ function createIpcRendererAdapter() {
         'island:drag-move': (mouse) => tauri.core.invoke('island_drag_move', { mouse }),
         'island:drag-end': () => tauri.core.invoke('island_drag_end'),
         'intervention:respond': (decision) => tauri.core.invoke('intervention_respond', { decision }),
-        'providers:set-visibility': (provider, visible) => tauri.core.invoke('providers_set_visibility', { provider, visible })
+        'providers:set-visibility': (provider, visible) => tauri.core.invoke('providers_set_visibility', { provider, visible }),
+        'island:set-pill-width': (width) => tauri.core.invoke('island_set_pill_width', { width })
     };
 
     return {
@@ -338,13 +340,17 @@ function renderPillProgress(accounts) {
     }
 
     const displayAccounts = accounts.slice(0, 5);
-    const tight = displayAccounts.length >= 5;
+    const compact = displayAccounts.length >= 5;
 
     pillProgress.classList.remove('hidden');
     pillContent.classList.add('pillContent-rings');
-    if (tight) pillContent.classList.add('pillContent-rings-tight');
+    if (compact) pillContent.classList.add('pillContent-rings-tight');
     primaryValue.classList.add('pillTextHidden');
     pillProgress.innerHTML = displayAccounts.map((account) => {
+        if (account.provider === 'deepseek' && getPillMeterText(account)) {
+            return renderPillStat(account);
+        }
+
         const progressLine = getProgressLine(account);
         if (!progressLine) {
             return renderPillMeter(account, displayAccounts.length);
@@ -354,15 +360,15 @@ function renderPillProgress(accounts) {
         const limit = Number(progressLine.limit || 0);
         const percent = Math.max(0, Math.min(100, limit > 0 ? (used / limit) * 100 : 0));
         const displayPercent = progressLine.format?.mode === 'remaining' ? percent : Math.max(0, 100 - percent);
-        const radius = displayAccounts.length > 1 ? (tight ? 10 : 12) : 17;
-        const size = displayAccounts.length > 1 ? (tight ? 24 : 28) : 36;
+        const radius = displayAccounts.length > 1 ? (compact ? 10 : 12) : 17;
+        const size = displayAccounts.length > 1 ? (compact ? 24 : 28) : 36;
         const center = size / 2;
         const circumference = 2 * Math.PI * radius;
         const offset = circumference * (1 - displayPercent / 100);
         const label = progressLine.format?.ringText || getProviderShortLabel(account);
 
         return `
-            <div class="pillRing">
+            <div class="pillRing" style="width:${size}px;height:${size}px;flex:0 0 ${size}px">
                 <svg class="pillRingSvg" viewBox="0 0 ${size} ${size}" aria-hidden="true">
                     <circle class="pillProgressTrack" cx="${center}" cy="${center}" r="${radius}"></circle>
                     <circle class="pillProgressFill" cx="${center}" cy="${center}" r="${radius}"
@@ -372,6 +378,54 @@ function renderPillProgress(accounts) {
             </div>
         `;
     }).join('');
+
+    syncPillWidth();
+}
+
+function renderPillStat(account) {
+    const value = getPillStatValue(account);
+    const provider = getProviderShortLabel(account);
+    const tone = getPillStatTone(account);
+    const compactClass = value.length >= 5 ? ' pillStat-compact' : '';
+
+    return `
+        <div class="pillStat ${tone}${compactClass}">
+            <span class="pillStatProvider">${escapeHtml(provider)}</span>
+            <span class="pillStatValue">${escapeHtml(value)}</span>
+        </div>
+    `;
+}
+
+function getPillStatValue(account) {
+    const progressLine = getProgressLine(account);
+    if (progressLine) {
+        const limit = Number(progressLine.limit || 0);
+        const used = Number(progressLine.used || 0);
+        const percent = limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0;
+        const displayPercent = progressLine.format?.mode === 'remaining'
+            ? percent
+            : Math.max(0, Math.min(100, used));
+        return `${Math.round(displayPercent)}%`;
+    }
+
+    const meter = getPillMeterText(account);
+    return compactPillText(meter || '--');
+}
+
+function getPillStatTone(account) {
+    const progressLine = getProgressLine(account);
+    if (!progressLine) {
+        return 'pillStat-balance';
+    }
+
+    const limit = Number(progressLine.limit || 0);
+    const used = Number(progressLine.used || 0);
+    const percent = limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0;
+    const score = progressLine.format?.mode === 'remaining' ? percent : Math.max(0, 100 - percent);
+
+    if (score <= 20) return 'pillStat-danger';
+    if (score <= 45) return 'pillStat-warn';
+    return 'pillStat-good';
 }
 
 function renderPillMeter(account, count) {
@@ -389,7 +443,7 @@ function renderPillMeter(account, count) {
 
 function hidePillProgress() {
     pillProgress.classList.add('hidden');
-    pillContent.classList.remove('pillContent-rings', 'pillContent-rings-tight', 'pillContent-rings-right', 'pillContent-rings-hidden');
+    pillContent.classList.remove('pillContent-rings', 'pillContent-rings-tight', 'pillContent-rings-right', 'pillContent-rings-hidden', 'pillContent-stats');
     primaryLabel.classList.remove('pillTextHidden');
     primaryValue.classList.remove('pillTextHidden');
     pillProgress.innerHTML = '';
@@ -430,6 +484,12 @@ function compactPillText(text) {
     const value = Number(match[2]);
     if (!Number.isFinite(value)) {
         return raw;
+    }
+    if (Math.abs(value) >= 1000000000) {
+        return `${prefix}${(value / 1000000000).toFixed(1)}b`;
+    }
+    if (Math.abs(value) >= 1000000) {
+        return `${prefix}${(value / 1000000).toFixed(1)}m`;
     }
     if (Math.abs(value) >= 10000) {
         return `${prefix}${Math.round(value / 1000)}k`;
@@ -500,7 +560,7 @@ function getPrioritizedVisibleAccounts(accounts) {
 }
 
 function renderAccountCard(account) {
-    const plan = account.plan ? `<span class="accountPlan">${escapeHtml(account.plan)}</span>` : '';
+    const plan = account.plan ? `<div class="accountPlanRow"><span class="accountPlan">${escapeHtml(account.plan)}</span></div>` : '';
     const lines = Array.isArray(account.lines) ? account.lines.slice(0, 2).map((line) => renderAccountLine(line)).join('') : '';
     const statusClass = account.status ? ` account-${escapeHtml(account.status)}` : '';
     const tip = getAccountTip(account);
@@ -870,6 +930,28 @@ function scheduleExpandedHeightSync() {
     });
 }
 
+function syncPillWidth() {
+    if (island.classList.contains('expanded')) {
+        return;
+    }
+
+    const logoWidth = primaryLabel.offsetWidth || 0;
+    const ringsWidth = pillProgress.offsetWidth || 0;
+    const gap = 14;
+    const islandStyle = window.getComputedStyle(island);
+    const padLeft = Number.parseFloat(islandStyle.paddingLeft) || 0;
+    const padRight = Number.parseFloat(islandStyle.paddingRight) || 0;
+    const needed = Math.ceil(logoWidth + gap + ringsWidth + padLeft + padRight + 4);
+    const minW = 140;
+    const clamped = Math.max(minW, needed);
+
+    if (Math.abs(clamped - lastPillWidth) < 6) {
+        return;
+    }
+    lastPillWidth = clamped;
+    ipcRenderer.send('island:set-pill-width', clamped);
+}
+
 function applySourceTheme(source) {
     interventionPanel.classList.remove('source-claude', 'source-codex', 'source-agent');
 
@@ -1091,7 +1173,7 @@ function renderProviderToggles() {
             <div class="providerToggle" data-provider="${escapeHtml(key)}">
                 <span class="providerToggleLabel">
                     ${renderProviderBadge(key, info.label)}
-                    ${escapeHtml(info.label)}
+                    <span class="providerToggleName">${escapeHtml(info.label)}</span>
                     ${renderTipBadge(tip)}
                 </span>
                 <div class="toggleSwitch${activeClass}"></div>

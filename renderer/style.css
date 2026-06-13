@@ -20,11 +20,11 @@ body, html {
     width: 100%;
     box-sizing: border-box;
     color: white;
-    border-radius: 24px;
+    border-radius: 22px;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    padding: 10px 14px;
+    gap: 8px;
+    padding: 8px 12px;
     transition: all 0.18s ease;
     box-shadow: 0 10px 30px rgba(0, 0, 0, 0.28);
     backdrop-filter: blur(20px);
@@ -38,8 +38,8 @@ body, html {
     min-height: 50px;
     box-sizing: border-box;
     gap: 0;
-    padding: 4px 12px;
-    border-radius: 18px;
+    padding: 4px 10px;
+    border-radius: 17px;
 }
 
 #island.expanded {
@@ -50,7 +50,7 @@ body, html {
     padding-right: 12px;
     padding-bottom: 0;
     max-height: 100vh;
-    overflow: hidden;
+    overflow: visible;
     display: flex;
     flex-direction: column;
 }
@@ -59,7 +59,7 @@ body, html {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 14px;
+    gap: 10px;
     font-size: 12px;
     padding: 2px 0;
     cursor: grab;
@@ -72,9 +72,11 @@ body, html {
 }
 
 #pillContent.pillContent-rings {
-    justify-content: center;
+    justify-content: flex-end;
     position: relative;
     gap: 0;
+    padding-left: 41px;
+    box-sizing: border-box;
 }
 
 #pillContent.pillContent-rings #primaryLabel {
@@ -107,17 +109,19 @@ body, html {
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 6px;
+    gap: 5px;
     flex: 0 0 auto;
     height: 100%;
     min-height: 0;
+    margin-left: auto;
+    max-width: 100%;
 }
 
 .pillRing {
     position: relative;
-    width: 28px;
-    height: 28px;
-    flex: 0 0 28px;
+    width: 26px;
+    height: 26px;
+    flex: 0 0 26px;
 }
 
 .pillRing:first-child:last-child {
@@ -147,7 +151,7 @@ body, html {
 }
 
 .pillContent-rings-tight {
-    justify-content: center !important;
+    justify-content: flex-end !important;
     gap: 0 !important;
 }
 
@@ -193,12 +197,12 @@ body, html {
     align-items: center;
     justify-content: center;
     gap: 4px;
-    min-width: 54px;
-    max-width: 88px;
+    min-width: 56px;
+    max-width: 94px;
     height: 28px;
-    padding: 0 8px;
+    padding: 0 9px;
     border-radius: 9px;
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.065);
     border: 1px solid rgba(92, 225, 160, 0.34);
     color: rgba(255, 255, 255, 0.94);
     font-weight: 750;
@@ -219,10 +223,92 @@ body, html {
     text-overflow: ellipsis;
 }
 
+.pillStat {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 0;
+    height: 28px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    box-sizing: border-box;
+    flex: 0 0 auto;
+}
+
+.pillStatProvider {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    font-size: 10px;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.96);
+    background: rgba(255, 255, 255, 0.12);
+    flex: 0 0 18px;
+}
+
+.pillStatValue {
+    font-size: 10px;
+    font-weight: 750;
+    line-height: 1;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.94);
+}
+
+.pillStat-compact {
+    padding: 0 7px;
+    gap: 4px;
+}
+
+.pillStat-compact .pillStatValue {
+    font-size: 9px;
+}
+
+.pillStat-good {
+    border-color: rgba(92, 225, 160, 0.34);
+}
+
+.pillStat-good .pillStatProvider {
+    background: rgba(92, 225, 160, 0.22);
+    color: rgba(161, 247, 205, 0.98);
+}
+
+.pillStat-warn {
+    border-color: rgba(255, 193, 92, 0.34);
+}
+
+.pillStat-warn .pillStatProvider {
+    background: rgba(255, 193, 92, 0.22);
+    color: rgba(255, 225, 166, 0.98);
+}
+
+.pillStat-danger {
+    border-color: rgba(255, 112, 112, 0.34);
+}
+
+.pillStat-danger .pillStatProvider {
+    background: rgba(255, 112, 112, 0.22);
+    color: rgba(255, 190, 190, 0.98);
+}
+
+.pillStat-balance {
+    border-color: rgba(92, 225, 160, 0.28);
+}
+
+.pillStat-balance .pillStatProvider {
+    background: rgba(92, 225, 160, 0.2);
+    color: rgba(161, 247, 205, 0.98);
+}
+
 #primaryLabel {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
+    gap: 7px;
     font-weight: 600;
     opacity: 0.72;
     letter-spacing: 0.02em;
@@ -322,11 +408,13 @@ body, html {
 #expandedContent {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     flex: 1 1 auto;
     min-height: 0;
     -webkit-app-region: no-drag;
-    overflow: hidden;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding-right: 2px;
 }
 
 #expandedContent::-webkit-scrollbar {
@@ -360,13 +448,13 @@ body, html {
 .accounts {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 7px;
     flex: 1 1 auto;
     min-height: 0;
-    overflow-y: auto;
-    padding-top: 2px;
+    overflow: visible;
+    padding-top: 0;
     padding-right: 2px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    border-top: none;
     scrollbar-width: none;
     -ms-overflow-style: none;
 }
@@ -375,13 +463,21 @@ body, html {
     display: none;
 }
 
+.topStack {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding-top: 2px;
+}
+
 .providersPanel {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 0;
     flex: 0 0 auto;
-    padding-top: 2px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    padding: 0;
+    border-top: none;
+    overflow: visible;
 }
 
 .providersHeader {
@@ -392,42 +488,63 @@ body, html {
 }
 
 .providerToggles {
-    display: flex;
-    flex-direction: column;
-    gap: 3px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    overflow: visible;
 }
 
 .providerToggle {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    padding: 4px 8px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.04);
+    min-height: 26px;
+    padding: 4px 7px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.05);
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background 0.15s, border-color 0.15s;
+    overflow: visible;
+    position: relative;
+    z-index: 1;
 }
 
 .providerToggle:hover {
-    background: rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.075);
+    border-color: rgba(255, 255, 255, 0.1);
+    z-index: 20;
 }
 
 .providerToggleLabel {
-    font-size: 11px;
-    opacity: 0.8;
+    font-size: 9px;
+    font-weight: 600;
+    opacity: 0.88;
     display: inline-flex;
     align-items: center;
-    gap: 5px;
+    gap: 6px;
     min-width: 0;
+    overflow: visible;
+    white-space: nowrap;
+}
+
+.providerToggleName {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.providerToggleLabel .tipBadge {
+    flex: 0 0 auto;
 }
 
 .providerBadge {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    width: 18px;
-    height: 18px;
-    flex: 0 0 18px;
+    width: 17px;
+    height: 17px;
+    flex: 0 0 17px;
     border-radius: 6px;
     font-size: 10px;
     font-weight: 800;
@@ -463,9 +580,9 @@ body, html {
 
 .toggleSwitch {
     position: relative;
-    width: 32px;
-    height: 18px;
-    border-radius: 9px;
+    width: 30px;
+    height: 17px;
+    border-radius: 999px;
     background: rgba(255, 255, 255, 0.15);
     transition: background 0.2s;
     cursor: pointer;
@@ -480,24 +597,25 @@ body, html {
     position: absolute;
     top: 2px;
     left: 2px;
-    width: 14px;
-    height: 14px;
+    width: 13px;
+    height: 13px;
     border-radius: 50%;
     background: white;
     transition: transform 0.2s;
 }
 
 .toggleSwitch.active::after {
-    transform: translateX(14px);
+    transform: translateX(13px);
 }
 
 .accountCard {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 8px 9px;
-    border-radius: 12px;
-    background: rgba(255, 255, 255, 0.04);
+    padding: 8px 9px 9px;
+    border-radius: 13px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.03));
+    border: 1px solid rgba(255, 255, 255, 0.05);
     overflow: visible;
 }
 
@@ -516,7 +634,7 @@ body, html {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 8px;
+    gap: 10px;
 }
 
 .accountNameWrap {
@@ -542,16 +660,16 @@ body, html {
     color: rgba(255, 255, 255, 0.82);
     background: rgba(255, 255, 255, 0.12);
     cursor: help;
-    z-index: 100;
+    z-index: 120;
 }
 
 .tipBadge::after {
     content: attr(data-tip);
     position: absolute;
     left: 0;
-    top: calc(100% + 7px);
-    bottom: auto;
-    z-index: 999;
+    bottom: calc(100% + 7px);
+    top: auto;
+    z-index: 9999;
     width: 190px;
     max-width: 60vw;
     padding: 8px 9px;
@@ -568,7 +686,7 @@ body, html {
     opacity: 0;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    transform: translate(0, -3px);
+    transform: translate(0, 3px);
     pointer-events: none;
     transition: opacity 0.12s ease, transform 0.12s ease;
 }
@@ -578,14 +696,36 @@ body, html {
     transform: translate(0, 0);
 }
 
-.tipBadge:hover::after {
+.providerToggle:nth-child(even) .tipBadge::after {
+    left: auto;
+    right: 0;
+}
+
+.providerToggle .tipBadge::after {
+    bottom: auto;
+    top: calc(100% + 7px);
+    transform: translate(0, -3px);
+}
+
+.providerToggle .tipBadge:hover::after {
     transform: translate(0, 0);
 }
 
 .accountPlan,
 .lineSub {
     font-size: 10px;
-    opacity: 0.62;
+    opacity: 0.56;
+}
+
+.accountPlanRow {
+    display: flex;
+    align-items: center;
+    justify-content: flex-start;
+    margin-top: -1px;
+}
+
+.lineSub {
+    margin-top: -2px;
 }
 
 .accountLines {
@@ -595,28 +735,34 @@ body, html {
 }
 
 .sessions {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    padding-top: 2px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 5px;
+    padding-top: 0;
+    border-top: none;
 }
 
 .sessionRow {
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 8px;
+    min-height: 24px;
+    padding: 4px 7px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .sessionName {
-    font-size: 11px;
+    font-size: 10px;
+    font-weight: 600;
     opacity: 0.76;
 }
 
 .sessionValue {
-    font-size: 11px;
-    opacity: 0.68;
+    font-size: 10px;
+    opacity: 0.72;
     text-transform: capitalize;
 }
 
@@ -624,9 +770,9 @@ body, html {
     display: flex;
     justify-content: stretch;
     flex: 0 0 auto;
-    padding: 8px 14px 12px;
+    padding: 7px 0 10px;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(0, 0, 0, 0.1);
+    background: transparent;
 }
 
 .actions .btn {
@@ -645,13 +791,12 @@ body, html {
 
 .runtimeWarning {
     flex: 0 0 auto;
-    margin: 0 14px;
-    padding: 7px 9px;
-    border-radius: 10px;
+    padding: 5px 7px;
+    border-radius: 9px;
     background: rgba(255, 159, 10, 0.14);
     border: 1px solid rgba(255, 159, 10, 0.22);
     color: rgba(255, 236, 204, 0.92);
-    font-size: 10px;
+    font-size: 9px;
     line-height: 1.3;
     word-break: break-word;
 }
@@ -660,11 +805,10 @@ body, html {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    margin: 0 14px;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.05);
-    border: 1px solid rgba(255, 255, 255, 0.06);
+    padding: 7px 9px;
+    border-radius: 11px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
 .settingsRow {
@@ -675,8 +819,8 @@ body, html {
 }
 
 .settingsLabel {
-    font-size: 10px;
-    opacity: 0.7;
+    font-size: 9px;
+    opacity: 0.74;
 }
 
 .settingsStepper {
@@ -704,16 +848,20 @@ body, html {
 }
 
 .settingsValue {
-    min-width: 34px;
+    min-width: 38px;
     text-align: center;
     font-size: 11px;
     font-weight: 650;
 }
 
 .settingsMeta {
-    font-size: 9px;
+    font-size: 8px;
     line-height: 1.3;
-    opacity: 0.52;
+    opacity: 0.48;
+}
+
+.compactHidden {
+    display: none !important;
 }
 
 .source-claude {

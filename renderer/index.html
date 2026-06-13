@@ -44,21 +44,23 @@
                         <button id="denyButton" class="btn deny">Deny</button>
                     </div>
                 </div>
-                <div id="providersPanel" class="providersPanel">
-                    <div id="providerToggles" class="providerToggles"></div>
-                </div>
-                <div id="settingsPanel" class="settingsPanel">
-                    <div class="settingsRow">
-                        <span class="settingsLabel">Sync cadence</span>
-                        <div class="settingsStepper">
-                            <button id="syncIntervalDown" class="stepperButton" type="button" aria-label="Decrease sync interval">-</button>
-                            <span id="syncIntervalValue" class="settingsValue">10m</span>
-                            <button id="syncIntervalUp" class="stepperButton" type="button" aria-label="Increase sync interval">+</button>
-                        </div>
+                <div class="topStack">
+                    <div id="providersPanel" class="providersPanel">
+                        <div id="providerToggles" class="providerToggles"></div>
                     </div>
-                    <div id="settingsMeta" class="settingsMeta">Warnings appear here when hooks, shortcuts, or sync need attention.</div>
+                    <div id="settingsPanel" class="settingsPanel">
+                        <div class="settingsRow">
+                            <span class="settingsLabel">Sync cadence</span>
+                            <div class="settingsStepper">
+                                <button id="syncIntervalDown" class="stepperButton" type="button" aria-label="Decrease sync interval">-</button>
+                                <span id="syncIntervalValue" class="settingsValue">10m</span>
+                                <button id="syncIntervalUp" class="stepperButton" type="button" aria-label="Increase sync interval">+</button>
+                            </div>
+                        </div>
+                        <div id="runtimeWarning" class="runtimeWarning hidden"></div>
+                        <div id="settingsMeta" class="settingsMeta">Warnings show here when something needs attention.</div>
+                    </div>
                 </div>
-                <div id="runtimeWarning" class="runtimeWarning hidden"></div>
                 <div id="sessionsList" class="sessions hidden"></div>
                 <div id="accountsList" class="accounts"></div>
                 <div class="actions">

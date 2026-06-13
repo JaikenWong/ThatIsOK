@@ -51,6 +51,7 @@ struct AppState {
 struct IslandState {
     mode: String,
     expanded_height: u32,
+    pill_width: u32,
     drag_start_bounds: Option<WindowBounds>,
     drag_start_mouse: Option<MousePoint>,
 }
@@ -60,6 +61,7 @@ impl Default for IslandState {
         Self {
             mode: "pill".to_string(),
             expanded_height: DEFAULT_EXPANDED_HEIGHT,
+            pill_width: PILL_WIDTH,
             drag_start_bounds: None,
             drag_start_mouse: None,
         }
@@ -1014,7 +1016,7 @@ fn set_mode(app: &AppHandle, mode: &str) -> Result<(), String> {
     let width = if mode == "expanded" {
         EXPANDED_WIDTH
     } else {
-        PILL_WIDTH
+        state.pill_width
     };
     let height = if mode == "expanded" {
         state.expanded_height
@@ -1088,6 +1090,28 @@ fn island_set_expanded_height(app: AppHandle, height: f64) -> Result<(), String>
         }
     }
     set_mode(&app, "expanded")
+}
+
+#[tauri::command]
+fn island_set_pill_width(app: AppHandle, width: f64) -> Result<(), String> {
+    let window = main_window(&app)?;
+    let (_, _, area_w, _) = primary_work_area(&window)?;
+    let next_width = width
+        .round()
+        .max(120.0)
+        .min((area_w as f64 * 0.9).max(120.0)) as u32;
+    {
+        let app_state = app.state::<AppState>();
+        let mut state = app_state.window.lock().map_err(|err| err.to_string())?;
+        if state.pill_width == next_width {
+            return Ok(());
+        }
+        state.pill_width = next_width;
+        if state.mode != "pill" {
+            return Ok(());
+        }
+    }
+    set_mode(&app, "pill")
 }
 
 #[tauri::command]
@@ -1316,6 +1340,7 @@ pub fn run() {
             island_sync_now,
             island_set_mode,
             island_set_expanded_height,
+            island_set_pill_width,
             island_drag_start,
             island_drag_move,
             island_drag_end,
