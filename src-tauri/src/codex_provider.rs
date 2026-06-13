@@ -125,9 +125,16 @@ async fn fetch_codex_usage_api(
     if !response.status().is_success() {
         return Err(format!("HTTP {}", response.status().as_u16()));
     }
+    let headers = response.headers().clone();
     let mut data: Value = response.json().await.map_err(|e| e.to_string())?;
     if let Some(obj) = data.as_object_mut() {
         obj.insert("source".to_string(), Value::String("provider_api".to_string()));
+        if let Some(val) = headers.get("x-codex-primary-used-percent").and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<f64>().ok()) {
+            obj.insert("header_primary_used_pct".to_string(), json!(val));
+        }
+        if let Some(val) = headers.get("x-codex-secondary-used-percent").and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<f64>().ok()) {
+            obj.insert("header_secondary_used_pct".to_string(), json!(val));
+        }
     }
     Ok(data)
 }
@@ -313,6 +320,35 @@ fn build_codex_lines(usage: Option<&Value>) -> Vec<Value> {
         None => return Vec::new(),
     };
     let mut lines = Vec::new();
+
+    // Prefer response headers (primary source in OpenUsage)
+    let header_primary = data.get("header_primary_used_pct").and_then(read_number_value);
+    let header_secondary = data.get("header_secondary_used_pct").and_then(read_number_value);
+
+    if let Some(pct) = header_primary {
+        lines.push(json!({
+            "type": "progress",
+            "label": "Session",
+            "used": pct,
+            "limit": 100.0,
+            "format": { "kind": "percent" },
+            "subtitle": format!("{}% used", pct.round()),
+        }));
+    }
+    if let Some(pct) = header_secondary {
+        lines.push(json!({
+            "type": "progress",
+            "label": "Weekly",
+            "used": pct,
+            "limit": 100.0,
+            "format": { "kind": "percent" },
+            "subtitle": format!("{}% used", pct.round()),
+        }));
+    }
+
+    if !lines.is_empty() {
+        return lines;
+    }
 
     let rate_limit = data.get("rate_limit").or_else(|| data.get("rateLimits"));
     let primary = rate_limit
