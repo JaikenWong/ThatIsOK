@@ -3,7 +3,7 @@ use std::env;
 use std::fs;
 use std::io::{self, BufRead, Read, Write};
 use std::path::Path;
-use std::process;
+
 use tauri::{AppHandle, Emitter, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::net::{TcpListener, TcpStream};
@@ -150,10 +150,15 @@ fn run_hook_bridge(source: &str, event_name: &str, input: &str) -> Result<(), St
             "payload": serde_json::from_str::<Value>(input).ok()
         }
     });
+    let addr: std::net::SocketAddr = "127.0.0.1:45873".parse().map_err(|e: std::net::AddrParseError| e.to_string())?;
     let mut stream =
-        std::net::TcpStream::connect(("127.0.0.1", 45873)).map_err(|err| err.to_string())?;
+        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3))
+            .map_err(|err| err.to_string())?;
     stream
         .write_all(format!("{payload}\n").as_bytes())
+        .map_err(|err| err.to_string())?;
+    stream
+        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
         .map_err(|err| err.to_string())?;
     let mut reader = std::io::BufReader::new(stream);
     let mut line = String::new();
@@ -297,7 +302,6 @@ fn build_tauri_hook_command(exe_path: &Path, source: &str, event_name: &str) -> 
 
 #[cfg(windows)]
 fn short_path_name(path: &Path) -> String {
-    use std::ffi::OsStr;
     use std::os::windows::ffi::OsStrExt;
     let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
     let mut buf = vec![0u16; 512];
