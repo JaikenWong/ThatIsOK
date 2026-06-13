@@ -58,6 +58,13 @@ pub(crate) fn inject_agent_hooks(app: &AppHandle) {
             "Claude hook setup failed. Check local permissions and Claude settings.",
         );
     }
+    if let Err(error) = inject_opencode_hooks() {
+        eprintln!("failed to install OpenCode hooks: {error}");
+        emit_runtime_warning(
+            app,
+            "OpenCode hook setup failed. Check local permissions and OpenCode config.",
+        );
+    }
 }
 
 pub(crate) async fn start_hook_server(app: AppHandle) {
@@ -174,11 +181,9 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
             .collect::<Vec<_>>();
         let mut next_entries = filtered;
         next_entries.push(json!({
-            "hooks": [{
-                "type": "command",
-                "command": build_tauri_hook_command(exe_path, "codex", event_name),
-                "timeout": if *event_name == "PermissionRequest" { 86400 } else { 10 }
-            }],
+            "type": "command",
+            "command": build_tauri_hook_command(exe_path, "codex", event_name),
+            "timeout": if *event_name == "PermissionRequest" { 86400 } else { 10 },
             "_managedBy": MANAGED_KEY
         }));
         config["hooks"][*event_name] = Value::Array(next_entries);
@@ -379,6 +384,19 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
             "allowPersistent": false
         }),
     }
+}
+
+fn inject_opencode_hooks() -> Result<(), String> {
+    let Some(home) = dirs::home_dir() else {
+        return Err("home directory not available".to_string());
+    };
+    let plugins_dir = home.join(".config").join("opencode").join("plugins");
+    fs::create_dir_all(&plugins_dir).map_err(|err| err.to_string())?;
+    let plugin_path = plugins_dir.join("thatisok.js");
+    let plugin_content =
+        include_str!("../plugins/thatisok-opencode.js");
+    fs::write(&plugin_path, plugin_content).map_err(|err| err.to_string())?;
+    Ok(())
 }
 
 fn emit_runtime_warning(app: &AppHandle, message: &str) {
