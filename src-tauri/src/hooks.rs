@@ -198,7 +198,7 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
             .filter(|entry| !is_managed_hook_value(entry))
             .collect::<Vec<_>>();
         let mut next_entries = filtered;
-        let timeout = if *event_name == "PreToolUse" || *event_name == "PermissionRequest" { 86400 } else { 10 };
+        let timeout = if *event_name == "PreToolUse" || *event_name == "PermissionRequest" { 86400 } else { 10000 };
         let command = build_tauri_hook_command(exe_path, "codex", event_name);
         let matcher_needed = !matches!(event_name, &"UserPromptSubmit" | &"Stop");
         let mut entry = json!({
@@ -253,7 +253,7 @@ fn inject_claude_hooks(exe_path: &Path) -> Result<(), String> {
             "hooks": [{
                 "type": "command",
                 "command": build_tauri_hook_command(exe_path, "claude", event_name),
-                "timeout": if *event_name == "PermissionRequest" { 86400 } else { 10 }
+                "timeout": if *event_name == "PermissionRequest" { 86400 } else { 10000 }
             }],
             "_managedBy": MANAGED_KEY
         }));
