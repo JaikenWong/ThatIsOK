@@ -47,22 +47,29 @@ pub fn run_hook_bridge_from_args() -> bool {
 }
 
 fn read_stdin_json() -> String {
-    let mut buffer = Vec::new();
-    let mut chunk = [0u8; 4096];
-    let stdin = io::stdin();
-    loop {
-        match stdin.lock().read(&mut chunk) {
-            Ok(0) => break,
-            Ok(n) => {
-                buffer.extend_from_slice(&chunk[..n]);
-                if serde_json::from_slice::<Value>(&buffer).is_ok() {
-                    break;
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let mut buffer = Vec::new();
+        let mut chunk = [0u8; 4096];
+        let stdin = io::stdin();
+        loop {
+            match stdin.lock().read(&mut chunk) {
+                Ok(0) => break,
+                Ok(n) => {
+                    buffer.extend_from_slice(&chunk[..n]);
+                    if serde_json::from_slice::<Value>(&buffer).is_ok() {
+                        break;
+                    }
                 }
+                Err(_) => break,
             }
-            Err(_) => break,
         }
+        let _ = tx.send(buffer);
+    });
+    match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+        Ok(buffer) => String::from_utf8_lossy(&buffer).to_string(),
+        Err(_) => String::new(),
     }
-    String::from_utf8_lossy(&buffer).to_string()
 }
 
 pub(crate) fn inject_agent_hooks(app: &AppHandle) {
