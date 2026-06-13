@@ -1160,7 +1160,17 @@ fn island_drag_end(app: AppHandle) -> Result<(), String> {
     let app_state = app.state::<AppState>();
     let mut state = app_state.window.lock().map_err(|err| err.to_string())?;
     state.drag_start_bounds = None;
-    state.drag_start_mouse = None;
+    state.drag_start_mouse = {
+        if let Ok(window) = main_window(&app) {
+            if let Ok(pos) = window.outer_position() {
+                let mut defaults = read_json_file("defaults.json");
+                defaults["windowX"] = json!(pos.x);
+                defaults["windowY"] = json!(pos.y);
+                let _ = write_defaults(&defaults);
+            }
+        }
+        None
+    };
     Ok(())
 }
 
@@ -1234,11 +1244,21 @@ fn settings_set_sync_interval(app: AppHandle, minutes: u64) -> Result<Value, Str
 }
 
 fn position_initial(window: &WebviewWindow) -> Result<(), String> {
-    let (area_x, area_y, area_w, _) = primary_work_area(window)?;
-    let x = area_x + ((area_w as i32 - PILL_WIDTH as i32) / 2);
-    window
-        .set_position(PhysicalPosition::new(x, area_y + WINDOW_MARGIN))
-        .map_err(|err| err.to_string())
+    let defaults = read_json_file("defaults.json");
+    if let (Some(x), Some(y)) = (
+        defaults.get("windowX").and_then(Value::as_i64),
+        defaults.get("windowY").and_then(Value::as_i64),
+    ) {
+        window
+            .set_position(PhysicalPosition::new(x as i32, y as i32))
+            .map_err(|err| err.to_string())
+    } else {
+        let (area_x, area_y, area_w, _) = primary_work_area(window)?;
+        let x = area_x + ((area_w as i32 - PILL_WIDTH as i32) / 2);
+        window
+            .set_position(PhysicalPosition::new(x, area_y + WINDOW_MARGIN))
+            .map_err(|err| err.to_string())
+    }
 }
 
 fn configured_sync_interval() -> u64 {
