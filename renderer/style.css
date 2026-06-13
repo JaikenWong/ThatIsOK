@@ -861,6 +861,15 @@ body, html {
     opacity: 0.48;
 }
 
+.update-banner {
+    opacity: 0.9 !important;
+    font-size: 9px !important;
+    color: #a9ddff;
+    padding: 3px 6px;
+    border-radius: 6px;
+    background: rgba(97, 191, 255, 0.08);
+}
+
 .compactHidden {
     display: none !important;
 }

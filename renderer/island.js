@@ -1270,4 +1270,45 @@ Promise.all([
     renderShortcuts();
     renderSummary(data);
     renderIntervention(intervention);
+    loadVersion();
 });
+
+function showUpdateBanner(status, message) {
+    const el = document.getElementById('settingsMeta');
+    if (!el) return;
+    switch (status) {
+        case 'downloading':
+            el.textContent = `Downloading v${message}...`;
+            el.classList.add('update-banner');
+            break;
+        case 'installed':
+            el.textContent = 'Update installed. Restart to apply.';
+            el.classList.add('update-banner');
+            break;
+        case 'up-to-date':
+            el.textContent = 'ThatIsOK is up to date.';
+            el.classList.add('update-banner');
+            setTimeout(() => { el.textContent = ''; el.classList.remove('update-banner'); }, 4000);
+            break;
+        case 'error':
+            el.textContent = `Update failed: ${message}`;
+            el.classList.add('update-banner');
+            break;
+        default: break;
+    }
+}
+
+ipcRenderer.on('update-status', (_, payload) => {
+    showUpdateBanner(payload.status, payload.version || payload.message || '');
+});
+
+function loadVersion() {
+    try {
+        const tauri = window.__TAURI__;
+        if (tauri && tauri.app && tauri.app.getVersion) {
+            tauri.app.getVersion().then(v => {
+                document.getElementById('appVersion').textContent = `v${v}`;
+            }).catch(() => {});
+        }
+    } catch (_) {}
+}
