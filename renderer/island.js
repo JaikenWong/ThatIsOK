@@ -39,7 +39,7 @@ const PROVIDER_SETUP_TIPS = {
     minimax: 'Requires MiniMax local login before plan usage can be synced.',
     gemini: 'Requires Gemini local login before usage can be synced.',
     deepseek: 'Requires DEEPSEEK_API_KEY in project .env or environment, then restart.',
-    opencode: 'Install ThatIsOk plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.'
+    opencode: 'Install ThatIsOK plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.'
 };
 
 let currentData = null;
@@ -61,6 +61,7 @@ let runtimeWarningTimer = null;
 let settingsState = { syncIntervalMinutes: 10 };
 const DRAG_THRESHOLD = 8;
 const SYNC_INTERVAL_STEPS = [5, 10, 15, 30, 60];
+const knownProviderOrder = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'minimax', 'opencode'];
 
 function expandIsland() {
     island.classList.remove('pill');
@@ -191,6 +192,10 @@ island.addEventListener('click', (event) => {
         return;
     }
 
+    if (event.target.closest('.providerToggle')) {
+        return;
+    }
+
     if (island.classList.contains('pill')) {
         expandIsland();
     } else {
@@ -272,10 +277,9 @@ function formatUsd(value) {
 
 function getAccountPriority(account) {
     const provider = account?.provider || '';
-    const order = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'minimax', 'opencode'];
-    const index = order.indexOf(provider);
+    const index = knownProviderOrder.indexOf(provider);
 
-    if (index === -1) return 100 + provider.charCodeAt(0);
+    if (index === -1) return 100;
 
     if (account?.status === 'stale') return index + 50;
 
@@ -1157,9 +1161,8 @@ function renderProviderToggles() {
     }
 
     providers.sort(([a], [b]) => {
-        const order = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'minimax', 'opencode'];
-        const ai = order.indexOf(a);
-        const bi = order.indexOf(b);
+        const ai = knownProviderOrder.indexOf(a);
+        const bi = knownProviderOrder.indexOf(b);
         if (ai !== -1 && bi !== -1) return ai - bi;
         if (ai !== -1) return -1;
         if (bi !== -1) return 1;

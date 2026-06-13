@@ -13,3 +13,4 @@ src-tauri/target/
 coverage/
 assets/icon.iconset/
 CLAUDE.md
+AGENTS.md

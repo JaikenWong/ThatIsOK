@@ -26,7 +26,7 @@ pub fn run_hook_bridge_from_args() -> bool {
     let _ = io::stdin().read_to_string(&mut input);
 
     if let Err(error) = run_hook_bridge(&source, &event_name, &input) {
-        eprintln!("ThatIsOk hook bridge failed: {error}");
+        eprintln!("ThatIsOK hook bridge failed: {error}");
         process::exit(0);
     }
     true
@@ -134,7 +134,7 @@ fn write_permission_output(response: &Value) -> Result<(), String> {
     if !approved {
         decision.insert(
             "message".to_string(),
-            Value::String("Denied from ThatIsOk".to_string()),
+            Value::String("Denied from ThatIsOK".to_string()),
         );
     }
     let output = json!({
@@ -357,7 +357,7 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
                 "requiresDecision": true,
                 "approved": false,
                 "allowPersistent": false,
-                "message": "ThatIsOk already has a pending approval."
+                "message": "ThatIsOK already has a pending approval."
             });
         }
         *pending = Some(intervention);

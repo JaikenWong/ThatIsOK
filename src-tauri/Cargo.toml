@@ -2,7 +2,7 @@
 name = "thatisok"
 version = "1.0.0"
 description = "AI agent cost and approval cockpit"
-authors = ["ThatIsOk"]
+authors = ["ThatIsOK"]
 edition = "2021"
 
 [lib]

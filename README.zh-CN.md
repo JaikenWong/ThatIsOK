@@ -1,6 +1,6 @@
-# ThatIsOk
+# ThatIsOK
 
-ThatIsOk 是一个面向 AI 编码工具的本地桌面审批与用量驾驶舱。它会在桌面顶部常驻一个小型悬浮岛，用来处理权限确认，同时汇总多个 provider 的使用情况。
+ThatIsOK 是一个面向 AI 编码工具的本地桌面审批与用量驾驶舱。它会在桌面顶部常驻一个小型悬浮岛，用来处理权限确认，同时汇总多个 provider 的使用情况。
 
 ## 解决的问题
 
@@ -65,7 +65,7 @@ npm run tauri:build
 ## 项目结构
 
 ```text
-ThatIsOk/
+ThatIsOK/
 |- src-tauri/    当前 Tauri 2 应用运行时与后端
 |- renderer/     Tauri webview 加载的悬浮岛 UI
 |- config/       providers、defaults
@@ -79,11 +79,11 @@ ThatIsOk/
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
 
-现在这些受管 hook 会直接指向打包后的 ThatIsOk 可执行文件，并附带 `--hook-source` 和 `--hook-event`。
+现在这些受管 hook 会直接指向打包后的 ThatIsOK 可执行文件，并附带 `--hook-source` 和 `--hook-event`。
 
 ## 说明
 
-- 当前运行时状态和同步逻辑集中在 `src-tauri/src/lib.rs`
+- 运行时代码已拆分到 `src-tauri/src/` 下的 hooks、shortcuts、providers、UI state 等模块
 - hook 本地 IPC 使用 `127.0.0.1:45873`
 - `renderer/dashboard/` 已删除，因为它已不再接入当前运行时
 

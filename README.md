@@ -1,6 +1,6 @@
-# ThatIsOk
+# ThatIsOK
 
-ThatIsOk is a local desktop approval and usage cockpit for AI coding tools. It keeps a small floating island on screen for permission decisions and tracks provider usage across local agents.
+ThatIsOK is a local desktop approval and usage cockpit for AI coding tools. It keeps a small floating island on screen for permission decisions and tracks provider usage across local agents.
 
 ## Why it exists
 
@@ -65,7 +65,7 @@ npm run tauri:build
 ## Project layout
 
 ```text
-ThatIsOk/
+ThatIsOK/
 |- src-tauri/    active Tauri 2 app runtime and backend
 |- renderer/     floating island UI loaded by Tauri webview
 |- config/       providers and defaults
@@ -79,11 +79,11 @@ On startup, the app injects managed hook entries into:
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
 
-Managed entries now point to the packaged ThatIsOk executable with `--hook-source` and `--hook-event`.
+Managed entries now point to the packaged ThatIsOK executable with `--hook-source` and `--hook-event`.
 
 ## Notes
 
-- Current runtime state and sync logic live in `src-tauri/src/lib.rs`
+- Runtime code is split across `src-tauri/src/` modules for hooks, shortcuts, providers, and UI state
 - Local hook IPC uses `127.0.0.1:45873`
 - `renderer/dashboard/` was removed because it was no longer wired to the active runtime
 

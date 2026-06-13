@@ -1351,6 +1351,11 @@ pub fn run() {
             settings_set_sync_interval
         ])
         .setup(|app| {
+            #[cfg(target_os = "macos")]
+            {
+                use tauri::ActivationPolicy;
+                let _ = app.set_activation_policy(ActivationPolicy::Accessory);
+            }
             let window = main_window(app.handle()).map_err(Box::<dyn std::error::Error>::from)?;
             position_initial(&window).map_err(Box::<dyn std::error::Error>::from)?;
             window.show().map_err(Box::<dyn std::error::Error>::from)?;
