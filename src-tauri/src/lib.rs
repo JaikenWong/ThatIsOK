@@ -1441,16 +1441,18 @@ pub fn run() {
                                         use tauri_plugin_updater::UpdaterExt;
                                         let h = app_handle_inner.clone();
                                         tauri::async_runtime::spawn(async move {
-                                            if let Ok(Some(update)) = h.updater().and_then(|u| u.check()) {
-                                                let mut downloaded = 0;
-                                                let _ = update.download_and_install(|chunk_length, content_length| {
-                                                    downloaded += chunk_length;
-                                                    if let Some(total) = content_length {
-                                                        println!("downloaded {downloaded} from {total}");
-                                                    }
-                                                }, || {
-                                                    println!("install finished");
-                                                }).await;
+                                            if let Ok(updater) = h.updater() {
+                                                if let Ok(Some(update)) = updater.check().await {
+                                                    let mut downloaded = 0;
+                                                    let _ = update.download_and_install(|chunk_length, content_length| {
+                                                        downloaded += chunk_length;
+                                                        if let Some(total) = content_length {
+                                                            println!("downloaded {downloaded} from {total}");
+                                                        }
+                                                    }, || {
+                                                        println!("install finished");
+                                                    }).await;
+                                                }
                                             }
                                         });
                                     }
