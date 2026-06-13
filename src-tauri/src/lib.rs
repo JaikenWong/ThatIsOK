@@ -1353,6 +1353,7 @@ fn replace_usage_balances(app: &AppHandle, accounts: Vec<Value>) -> bool {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
         .invoke_handler(tauri::generate_handler![
             island_get_data,
@@ -1392,17 +1393,20 @@ pub fn run() {
                 let sync_item = MenuItemBuilder::with_id("sync", "Sync Now")
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
+                let update_item = MenuItemBuilder::with_id("update", "Check for Updates")
+                    .build(app)
+                    .map_err(|e| format!("tray menu: {e}")).ok();
                 let sep = PredefinedMenuItem::separator(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let quit_item = MenuItemBuilder::with_id("quit", "Quit")
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
 
-                if let (Some(open), Some(sync_item), Some(sep), Some(quit_item)) =
-                    (open, sync_item, sep, quit_item)
+                if let (Some(open), Some(sync_item), Some(update_item), Some(sep), Some(quit_item)) =
+                    (open, sync_item, update_item, sep, quit_item)
                 {
                     let menu = MenuBuilder::new(app)
-                        .items(&[&open, &sync_item, &sep, &quit_item])
+                        .items(&[&open, &sync_item, &update_item, &sep, &quit_item])
                         .build()
                         .map_err(|e| format!("tray menu: {e}")).ok();
 
@@ -1431,6 +1435,23 @@ pub fn run() {
                                             };
                                             emit_sync_warning_if_needed(&h, data.get("accounts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]));
                                             let _ = h.emit("island-data", data);
+                                        });
+                                    }
+                                    "update" => {
+                                        use tauri_plugin_updater::UpdaterExt;
+                                        let h = app_handle_inner.clone();
+                                        tauri::async_runtime::spawn(async move {
+                                            if let Ok(Some(update)) = h.updater().and_then(|u| u.check()) {
+                                                let mut downloaded = 0;
+                                                let _ = update.download_and_install(|chunk_length, content_length| {
+                                                    downloaded += chunk_length;
+                                                    if let Some(total) = content_length {
+                                                        println!("downloaded {downloaded} from {total}");
+                                                    }
+                                                }, || {
+                                                    println!("install finished");
+                                                }).await;
+                                            }
                                         });
                                     }
                                     "quit" => {

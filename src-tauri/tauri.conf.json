@@ -29,7 +29,14 @@
       "csp": null
     },
     "withGlobalTauri": true,
-    "macOSPrivateApi": true
+    "macOSPrivateApi": true,
+    "plugins": {
+      "updater": {
+        "endpoints": [
+          "https://raw.githubusercontent.com/JaikenWong/ThatIsOK/main/update.json"
+        ]
+      }
+    }
   },
   "bundle": {
     "active": true,
