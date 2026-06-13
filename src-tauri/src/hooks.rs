@@ -198,12 +198,21 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
             .filter(|entry| !is_managed_hook_value(entry))
             .collect::<Vec<_>>();
         let mut next_entries = filtered;
-        next_entries.push(json!({
-            "type": "command",
-            "command": build_tauri_hook_command(exe_path, "codex", event_name),
-            "timeout": if *event_name == "PermissionRequest" { 86400 } else { 10 },
+        let timeout = if *event_name == "PermissionRequest" { 86400 } else { 10 };
+        let command = build_tauri_hook_command(exe_path, "codex", event_name);
+        let matcher_needed = !matches!(event_name, &"UserPromptSubmit" | &"Stop");
+        let mut entry = json!({
+            "hooks": [{
+                "type": "command",
+                "command": command,
+                "timeout": timeout
+            }],
             "_managedBy": MANAGED_KEY
-        }));
+        });
+        if matcher_needed {
+            entry["matcher"] = Value::String("*".to_string());
+        }
+        next_entries.push(entry);
         config["hooks"][*event_name] = Value::Array(next_entries);
     }
     if let Some(parent) = hooks_path.parent() {
