@@ -312,7 +312,8 @@ fn write_approval_rules(rules: &[ApprovalRule]) -> Result<(), String> {
 }
 
 fn is_managed_command(command: &str) -> bool {
-    command.contains("ThatIsOk")
+    let command = command.to_ascii_lowercase();
+    command.contains("thatisok")
         || command.contains("hook-bridge.js")
         || command.contains("--hook-source")
 }

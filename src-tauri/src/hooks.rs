@@ -187,6 +187,7 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
     if !config.get("hooks").is_some_and(Value::is_object) {
         config["hooks"] = json!({});
     }
+    let codex_hook_events = ["PermissionRequest"];
     for event_name in HOOK_EVENTS {
         let existing = config["hooks"]
             .get(*event_name)
@@ -198,22 +199,28 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
             .filter(|entry| !is_managed_hook_value(entry))
             .collect::<Vec<_>>();
         let mut next_entries = filtered;
-        let timeout = if *event_name == "PermissionRequest" { 86400 } else { 10 };
-        let command = build_tauri_hook_command(exe_path, "codex", event_name);
-        let matcher_needed = !matches!(event_name, &"UserPromptSubmit" | &"Stop");
-        let mut entry = json!({
-            "hooks": [{
-                "type": "command",
-                "command": command,
-                "timeout": timeout
-            }],
-            "_managedBy": MANAGED_KEY
-        });
-        if matcher_needed {
-            entry["matcher"] = Value::String("*".to_string());
+        if codex_hook_events.contains(event_name) {
+            let command = build_tauri_hook_command(exe_path, "codex", event_name);
+            let mut entry = json!({
+                "hooks": [{
+                    "type": "command",
+                    "command": command,
+                    "timeout": 86400
+                }],
+                "_managedBy": MANAGED_KEY
+            });
+            if !matches!(event_name, &"UserPromptSubmit" | &"Stop") {
+                entry["matcher"] = Value::String("*".to_string());
+            }
+            next_entries.push(entry);
         }
-        next_entries.push(entry);
-        config["hooks"][*event_name] = Value::Array(next_entries);
+        if next_entries.is_empty() {
+            if let Some(hooks) = config["hooks"].as_object_mut() {
+                hooks.remove(*event_name);
+            }
+        } else {
+            config["hooks"][*event_name] = Value::Array(next_entries);
+        }
     }
     if let Some(parent) = hooks_path.parent() {
         fs::create_dir_all(parent).map_err(|err| err.to_string())?;
