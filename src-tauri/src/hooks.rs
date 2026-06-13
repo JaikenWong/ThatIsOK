@@ -20,14 +20,29 @@ pub fn run_hook_bridge_from_args() -> bool {
         return false;
     }
 
+    let debug_log = |msg: &str| {
+        if let Some(home) = dirs::home_dir() {
+            let _ = fs::OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(home.join(".thatisok-hook-debug.log"))
+                .and_then(|mut f| write!(f, "[{}] {}\n", now_millis(), msg));
+        }
+    };
+    debug_log(&format!("hook-bridge start args={:?}", args));
+
     let source = get_cli_arg(&args, "--hook-source").unwrap_or_else(|| "unknown".to_string());
     let event_name = get_cli_arg(&args, "--hook-event").unwrap_or_else(|| "unknown".to_string());
+    debug_log(&format!("parsed source={source} event={event_name}"));
+
     let input = read_stdin_json();
+    debug_log(&format!("read stdin len={}", input.len()));
 
     if let Err(error) = run_hook_bridge(&source, &event_name, &input) {
-        eprintln!("ThatIsOK hook bridge failed: {error}");
-        process::exit(0);
+        debug_log(&format!("bridge FAILED: {error}"));
+        return true;
     }
+    debug_log("bridge OK");
     true
 }
 
