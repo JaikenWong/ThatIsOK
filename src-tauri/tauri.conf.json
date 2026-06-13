@@ -35,7 +35,8 @@
     "updater": {
       "endpoints": [
         "https://raw.githubusercontent.com/JaikenWong/ThatIsOK/main/update.json"
-      ]
+      ],
+      "appInstallerSignatureVerification": false
     }
   },
   "bundle": {
