@@ -29,6 +29,10 @@
     "deepseek": {
       "visible": true,
       "label": "DeepSeek"
+    },
+    "opencode": {
+      "visible": true,
+      "label": "OpenCode"
     }
   }
 }

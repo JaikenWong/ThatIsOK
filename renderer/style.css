@@ -34,17 +34,20 @@ body, html {
 }
 
 #island.pill {
-    height: 56px;
-    min-height: 56px;
+    height: 50px;
+    min-height: 50px;
     box-sizing: border-box;
     gap: 0;
-    padding: 6px 14px;
+    padding: 4px 12px;
     border-radius: 18px;
 }
 
 #island.expanded {
     height: 100%;
     border-radius: 18px 18px 20px 20px;
+    padding-top: 4px;
+    padding-left: 12px;
+    padding-right: 12px;
     padding-bottom: 0;
     max-height: 100vh;
     overflow: hidden;
@@ -58,7 +61,7 @@ body, html {
     justify-content: space-between;
     gap: 14px;
     font-size: 12px;
-    padding: 4px 0;
+    padding: 2px 0;
     cursor: grab;
 }
 
@@ -69,8 +72,27 @@ body, html {
 }
 
 #pillContent.pillContent-rings {
-    justify-content: space-between;
-    gap: 10px;
+    justify-content: center;
+    position: relative;
+    gap: 0;
+}
+
+#pillContent.pillContent-rings #primaryLabel {
+    position: absolute;
+    left: 0;
+    gap: 0;
+}
+
+#pillContent.pillContent-rings #primaryLabelText {
+    display: none;
+}
+
+#pillContent.pillContent-rings #primaryValue {
+    display: none;
+}
+
+#pillContent.pillContent-rings .pillProgressGroup {
+    flex: 0 0 auto;
 }
 
 #pillContent.pillContent-rings.pillContent-rings-hidden {
@@ -108,6 +130,31 @@ body, html {
     width: 100%;
     height: 100%;
     transform: rotate(-90deg);
+}
+
+.pillContent-rings-tight .pillRing {
+    width: 24px;
+    height: 24px;
+    flex-basis: 24px;
+}
+
+.pillContent-rings-tight #primaryLabel {
+    gap: 2px;
+}
+
+.pillContent-rings-tight .pillProgressGroup {
+    gap: 3px;
+}
+
+.pillContent-rings-tight {
+    justify-content: center !important;
+    gap: 0 !important;
+}
+
+.pillContent-rings-tight .pillMeter {
+    min-width: 40px;
+    padding: 0 5px;
+    font-size: 9px !important;
 }
 
 .pillProgressTrack,
@@ -193,7 +240,60 @@ body, html {
     height: 26px;
     border-radius: 6px;
     flex: 0 0 26px;
-    box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.08);
+}
+
+/* ---- animated logo SVG ---- */
+.logoBg {
+    fill: rgba(255, 255, 255, 0.06);
+    stroke: rgba(255, 255, 255, 0.06);
+    stroke-width: 0.5;
+}
+
+.logoRing {
+    fill: none;
+    stroke: rgba(92, 225, 160, 0.55);
+    stroke-width: 2;
+    stroke-dasharray: 61 20;
+    stroke-linecap: round;
+    transform-origin: 16px 16px;
+    animation: logoSpin 10s linear infinite;
+}
+
+.logoRingDot {
+    fill: rgba(92, 225, 160, 0.92);
+    transform-origin: 16px 16px;
+    animation: logoSpin 10s linear infinite;
+}
+
+.logoEye {
+    fill: rgba(255, 255, 255, 0.7);
+    transform-origin: center;
+    animation: logoBlink 6s ease-in-out infinite;
+}
+
+.logoEye.rightEye {
+    animation-delay: 0.3s;
+}
+
+/* Accelerate blink when intervention is pending */
+#island.tone-danger .logoEye {
+    animation-duration: 2.5s;
+}
+#island.tone-danger .logoEye.rightEye {
+    animation-delay: 0.12s;
+}
+#island.tone-danger .logoRing,
+#island.tone-danger .logoRingDot {
+    animation-duration: 4s;
+}
+
+@keyframes logoSpin {
+    to { transform: rotate(360deg); }
+}
+
+@keyframes logoBlink {
+    0%, 48%, 56%, 100% { transform: scaleY(1); }
+    50%, 54% { transform: scaleY(0.15); }
 }
 
 #island.pill #primaryLabelText {
@@ -398,6 +498,7 @@ body, html {
     padding: 8px 9px;
     border-radius: 12px;
     background: rgba(255, 255, 255, 0.04);
+    overflow: visible;
 }
 
 .account-stale {
@@ -423,6 +524,7 @@ body, html {
     align-items: center;
     gap: 5px;
     min-width: 0;
+    overflow: visible;
 }
 
 .tipBadge {
@@ -440,14 +542,16 @@ body, html {
     color: rgba(255, 255, 255, 0.82);
     background: rgba(255, 255, 255, 0.12);
     cursor: help;
+    z-index: 100;
 }
 
 .tipBadge::after {
     content: attr(data-tip);
     position: absolute;
     left: 0;
-    bottom: calc(100% + 7px);
-    z-index: 20;
+    top: calc(100% + 7px);
+    bottom: auto;
+    z-index: 999;
     width: 190px;
     max-width: 60vw;
     padding: 8px 9px;
@@ -462,9 +566,9 @@ body, html {
     white-space: normal;
     text-transform: none;
     opacity: 0;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    transform: translate(0, 3px);
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    transform: translate(0, -3px);
     pointer-events: none;
     transition: opacity 0.12s ease, transform 0.12s ease;
 }
@@ -474,13 +578,7 @@ body, html {
     transform: translate(0, 0);
 }
 
-.providerToggle .tipBadge::after {
-    top: calc(100% + 7px);
-    bottom: auto;
-    transform: translate(0, -3px);
-}
-
-.providerToggle .tipBadge:hover::after {
+.tipBadge:hover::after {
     transform: translate(0, 0);
 }
 
@@ -543,6 +641,79 @@ body, html {
     border-radius: 14px;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 120, 120, 0.25);
+}
+
+.runtimeWarning {
+    flex: 0 0 auto;
+    margin: 0 14px;
+    padding: 7px 9px;
+    border-radius: 10px;
+    background: rgba(255, 159, 10, 0.14);
+    border: 1px solid rgba(255, 159, 10, 0.22);
+    color: rgba(255, 236, 204, 0.92);
+    font-size: 10px;
+    line-height: 1.3;
+    word-break: break-word;
+}
+
+.settingsPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin: 0 14px;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.settingsRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.settingsLabel {
+    font-size: 10px;
+    opacity: 0.7;
+}
+
+.settingsStepper {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.stepperButton {
+    width: 22px;
+    height: 22px;
+    border: none;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 13px;
+    line-height: 1;
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+}
+
+.stepperButton:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.settingsValue {
+    min-width: 34px;
+    text-align: center;
+    font-size: 11px;
+    font-weight: 650;
+}
+
+.settingsMeta {
+    font-size: 9px;
+    line-height: 1.3;
+    opacity: 0.52;
 }
 
 .source-claude {
@@ -700,8 +871,8 @@ body, html {
 }
 
 .tone-danger {
-    background: linear-gradient(180deg, rgba(36, 14, 16, 0.95), rgba(24, 10, 12, 0.93));
-    border-color: rgba(255, 90, 90, 0.26);
+    background: linear-gradient(180deg, rgba(20, 18, 22, 0.96), rgba(14, 12, 16, 0.94));
+    border-color: rgba(255, 90, 90, 0.18);
 }
 
 .compactHidden {

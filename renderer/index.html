@@ -9,8 +9,14 @@
         <div id="island" class="pill">
             <div id="pillContent">
                 <span id="primaryLabel">
-                    <img id="primaryAppIcon" class="primaryAppIcon" src="icon-32.png" alt="ThatIsOk">
-                    <span id="primaryLabelText">ThatIsOk</span>
+                    <svg id="primaryAppIcon" class="primaryAppIcon" viewBox="0 0 32 32" fill="none" xmlns="http://www.w3.org/2000/svg">
+                        <rect class="logoBg" x="1" y="1" width="30" height="30" rx="7" />
+                        <circle class="logoRing" cx="16" cy="16" r="13" />
+                        <circle class="logoRingDot" cx="16" cy="3" r="2.5" />
+                        <rect class="logoEye leftEye" x="8" y="11" width="4" height="10" rx="2" />
+                        <rect class="logoEye rightEye" x="20" y="11" width="4" height="10" rx="2" />
+                    </svg>
+                    <span id="primaryLabelText">ThatIsOK</span>
                 </span>
                 <span id="primaryValue">Live</span>
                 <div id="pillProgress" class="pillProgressGroup hidden"></div>
@@ -39,9 +45,20 @@
                     </div>
                 </div>
                 <div id="providersPanel" class="providersPanel">
-                    <div class="providersHeader">Providers</div>
                     <div id="providerToggles" class="providerToggles"></div>
                 </div>
+                <div id="settingsPanel" class="settingsPanel">
+                    <div class="settingsRow">
+                        <span class="settingsLabel">Sync cadence</span>
+                        <div class="settingsStepper">
+                            <button id="syncIntervalDown" class="stepperButton" type="button" aria-label="Decrease sync interval">-</button>
+                            <span id="syncIntervalValue" class="settingsValue">10m</span>
+                            <button id="syncIntervalUp" class="stepperButton" type="button" aria-label="Increase sync interval">+</button>
+                        </div>
+                    </div>
+                    <div id="settingsMeta" class="settingsMeta">Warnings appear here when hooks, shortcuts, or sync need attention.</div>
+                </div>
+                <div id="runtimeWarning" class="runtimeWarning hidden"></div>
                 <div id="sessionsList" class="sessions hidden"></div>
                 <div id="accountsList" class="accounts"></div>
                 <div class="actions">

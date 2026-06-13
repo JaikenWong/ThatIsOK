@@ -11,6 +11,11 @@ const pillProgress = document.getElementById('pillProgress');
 const sessionsList = document.getElementById('sessionsList');
 const accountsList = document.getElementById('accountsList');
 const syncButton = document.getElementById('syncButton');
+const settingsPanel = document.getElementById('settingsPanel');
+const syncIntervalDown = document.getElementById('syncIntervalDown');
+const syncIntervalUp = document.getElementById('syncIntervalUp');
+const syncIntervalValue = document.getElementById('syncIntervalValue');
+const settingsMeta = document.getElementById('settingsMeta');
 const interventionPanel = document.getElementById('interventionPanel');
 const interventionSource = document.getElementById('interventionSource');
 const interventionTool = document.getElementById('interventionTool');
@@ -22,6 +27,7 @@ const approveButton = document.getElementById('approveButton');
 const approveAlwaysButton = document.getElementById('approveAlwaysButton');
 const denyButton = document.getElementById('denyButton');
 const providerToggles = document.getElementById('providerToggles');
+const runtimeWarning = document.getElementById('runtimeWarning');
 const approveShortcut = document.getElementById('approveShortcut');
 const alwaysShortcut = document.getElementById('alwaysShortcut');
 const denyShortcut = document.getElementById('denyShortcut');
@@ -32,7 +38,8 @@ const PROVIDER_SETUP_TIPS = {
     cursor: 'Requires Cursor local login before usage can be synced.',
     minimax: 'Requires MiniMax local login before plan usage can be synced.',
     gemini: 'Requires Gemini local login before usage can be synced.',
-    deepseek: 'Requires DEEPSEEK_API_KEY in project .env or environment, then restart.'
+    deepseek: 'Requires DEEPSEEK_API_KEY in project .env or environment, then restart.',
+    opencode: 'Install ThatIsOk plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.'
 };
 
 let currentData = null;
@@ -49,7 +56,10 @@ let heightSyncDebounce = null;
 let pendingDragMove = null;
 let dragMoveFrame = null;
 let windowState = { mode: 'pill' };
+let runtimeWarningTimer = null;
+let settingsState = { syncIntervalMinutes: 10 };
 const DRAG_THRESHOLD = 8;
+const SYNC_INTERVAL_STEPS = [5, 10, 15, 30, 60];
 
 function expandIsland() {
     island.classList.remove('pill');
@@ -70,6 +80,38 @@ function collapseIsland() {
     island.classList.add('pill');
     expandedContent.classList.add('hidden');
     ipcRenderer.send('island:set-mode', 'pill');
+
+    // Re-render pill bars from latest data so collapsed view
+    // always reflects the most recent sync.
+    if (currentData) {
+        refreshPillContent(currentData);
+    }
+}
+
+/**
+ * Update only the pill header without touching the expanded account list.
+ */
+function refreshPillContent(data) {
+    const visibleAccounts = getPrioritizedVisibleAccounts(data.accounts || []);
+    const progressAccounts = visibleAccounts.filter(hasPillIndicator).slice(0, 5);
+    const primaryAccount = visibleAccounts[0];
+
+    if (progressAccounts.length) {
+        primaryLabelText.innerText = progressAccounts.length > 1 ? '' : (primaryAccount ? primaryAccount.label : 'Provider');
+        primaryValue.innerText = primaryAccount ? (primaryAccount.plan || 'Live') : 'Live';
+        renderPillProgress(progressAccounts);
+    } else if (primaryAccount) {
+        primaryLabelText.innerText = primaryAccount.label || 'Provider';
+        primaryValue.innerText = renderAccountHeadline(primaryAccount);
+        hidePillProgress();
+    } else {
+        primaryLabelText.innerText = 'Status';
+        primaryValue.innerText = 'Live';
+        hidePillProgress();
+    }
+
+    island.classList.remove('tone-neutral', 'tone-good', 'tone-warn', 'tone-danger');
+    island.classList.add(getTone(data));
 }
 
 function createIpcRendererAdapter() {
@@ -93,7 +135,9 @@ function createIpcRendererAdapter() {
         'island:get-data': 'island_get_data',
         'island:get-intervention': 'island_get_intervention',
         'island:sync-now': 'island_sync_now',
-        'providers:get-visibility': 'providers_get_visibility'
+        'providers:get-visibility': 'providers_get_visibility',
+        'settings:get': 'settings_get',
+        'settings:set-sync-interval': 'settings_set_sync_interval'
     };
 
     const sendMap = {
@@ -225,17 +269,14 @@ function formatUsd(value) {
 }
 
 function getAccountPriority(account) {
-    const provider = account?.provider;
-    const order = ['codex', 'claude', 'cursor', 'minimax', 'gemini', 'deepseek'];
+    const provider = account?.provider || '';
+    const order = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'minimax', 'opencode'];
     const index = order.indexOf(provider);
-    
-    // If not in our known list, put at the end
-    if (index === -1) return 100;
-    
-    // Secondary priority: stale accounts go after non-stale in the same group
-    // but the user mostly cares about the provider order.
+
+    if (index === -1) return 100 + provider.charCodeAt(0);
+
     if (account?.status === 'stale') return index + 50;
-    
+
     return index;
 }
 
@@ -266,7 +307,7 @@ function renderSummary(data) {
     const primaryAccount = visibleAccounts[0];
 
     if (progressAccounts.length) {
-        primaryLabelText.innerText = progressAccounts.length > 1 ? 'Providers' : (primaryAccount ? primaryAccount.label : 'Provider');
+        primaryLabelText.innerText = progressAccounts.length > 1 ? '' : (primaryAccount ? primaryAccount.label : 'Provider');
         primaryValue.innerText = primaryAccount ? (primaryAccount.plan || 'Live') : 'Live';
         renderPillProgress(progressAccounts);
     } else if (primaryAccount) {
@@ -297,9 +338,11 @@ function renderPillProgress(accounts) {
     }
 
     const displayAccounts = accounts.slice(0, 5);
+    const tight = displayAccounts.length >= 5;
 
     pillProgress.classList.remove('hidden');
     pillContent.classList.add('pillContent-rings');
+    if (tight) pillContent.classList.add('pillContent-rings-tight');
     primaryValue.classList.add('pillTextHidden');
     pillProgress.innerHTML = displayAccounts.map((account) => {
         const progressLine = getProgressLine(account);
@@ -311,8 +354,8 @@ function renderPillProgress(accounts) {
         const limit = Number(progressLine.limit || 0);
         const percent = Math.max(0, Math.min(100, limit > 0 ? (used / limit) * 100 : 0));
         const displayPercent = progressLine.format?.mode === 'remaining' ? percent : Math.max(0, 100 - percent);
-        const radius = displayAccounts.length > 1 ? 12 : 17;
-        const size = displayAccounts.length > 1 ? 28 : 36;
+        const radius = displayAccounts.length > 1 ? (tight ? 10 : 12) : 17;
+        const size = displayAccounts.length > 1 ? (tight ? 24 : 28) : 36;
         const center = size / 2;
         const circumference = 2 * Math.PI * radius;
         const offset = circumference * (1 - displayPercent / 100);
@@ -346,7 +389,7 @@ function renderPillMeter(account, count) {
 
 function hidePillProgress() {
     pillProgress.classList.add('hidden');
-    pillContent.classList.remove('pillContent-rings', 'pillContent-rings-right', 'pillContent-rings-hidden');
+    pillContent.classList.remove('pillContent-rings', 'pillContent-rings-tight', 'pillContent-rings-right', 'pillContent-rings-hidden');
     primaryLabel.classList.remove('pillTextHidden');
     primaryValue.classList.remove('pillTextHidden');
     pillProgress.innerHTML = '';
@@ -414,7 +457,8 @@ function getProviderShortLabel(account) {
         gemini: 'G',
         minimax: 'M',
         cursor: 'R',
-        deepseek: 'D'
+        deepseek: 'D',
+        opencode: 'O'
     };
     return map[account.provider] || String(account.label || '?').slice(0, 1).toUpperCase();
 }
@@ -426,7 +470,8 @@ function getProviderShortLabelByKey(provider, fallbackLabel = '?') {
         gemini: 'G',
         minimax: 'M',
         cursor: 'R',
-        deepseek: 'D'
+        deepseek: 'D',
+        opencode: 'O'
     };
     return map[provider] || String(fallbackLabel || '?').slice(0, 1).toUpperCase();
 }
@@ -656,6 +701,9 @@ function formatSource(source) {
     if (source === 'minimax') {
         return 'MiniMax';
     }
+    if (source === 'opencode') {
+        return 'OpenCode';
+    }
     return 'Agent';
 }
 
@@ -755,6 +803,7 @@ function updateCompactVisibility() {
     sessionsList.classList.toggle('hidden', compact || !sessionsList.innerHTML);
     accountsList.classList.toggle('compactHidden', compact);
     syncButton.classList.toggle('compactHidden', compact);
+    settingsPanel.classList.toggle('compactHidden', compact);
 }
 
 function scheduleExpandedHeightSync() {
@@ -852,6 +901,10 @@ ipcRenderer.on('intervention-state', (_event, intervention) => {
     renderIntervention(intervention);
 });
 
+ipcRenderer.on('runtime-warning', (_event, warning) => {
+    renderRuntimeWarning(warning);
+});
+
 ipcRenderer.on('island-window-state', (_event, nextState) => {
     windowState = nextState || windowState;
 });
@@ -861,9 +914,20 @@ syncButton.addEventListener('click', async () => {
     try {
         const data = await ipcRenderer.invoke('island:sync-now');
         renderSummary(data);
+    } catch (error) {
+        console.error('Sync failed', error);
+        renderRuntimeWarning('Sync failed. Try again in a moment.');
     } finally {
         syncButton.disabled = false;
     }
+});
+
+syncIntervalDown.addEventListener('click', async () => {
+    await nudgeSyncInterval(-1);
+});
+
+syncIntervalUp.addEventListener('click', async () => {
+    await nudgeSyncInterval(1);
 });
 
 approveButton.addEventListener('click', () => {
@@ -926,12 +990,99 @@ function renderShortcuts() {
     denyShortcut.innerText = `${prefix} D`;
 }
 
+function renderSettings() {
+    const minutes = Number(settingsState.syncIntervalMinutes) || 10;
+    syncIntervalValue.innerText = `${minutes}m`;
+    const index = SYNC_INTERVAL_STEPS.indexOf(minutes);
+    syncIntervalDown.disabled = index <= 0;
+    syncIntervalUp.disabled = index === -1 || index >= SYNC_INTERVAL_STEPS.length - 1;
+}
+
+async function loadSettings() {
+    const next = await ipcRenderer.invoke('settings:get');
+    settingsState = {
+        ...settingsState,
+        ...(next || {})
+    };
+    renderSettings();
+}
+
+async function nudgeSyncInterval(direction) {
+    const current = Number(settingsState.syncIntervalMinutes) || 10;
+    const currentIndex = Math.max(0, SYNC_INTERVAL_STEPS.indexOf(current));
+    const nextIndex = Math.min(
+        SYNC_INTERVAL_STEPS.length - 1,
+        Math.max(0, currentIndex + direction)
+    );
+    const nextMinutes = SYNC_INTERVAL_STEPS[nextIndex];
+    if (nextMinutes === current) {
+        return;
+    }
+
+    syncIntervalDown.disabled = true;
+    syncIntervalUp.disabled = true;
+    try {
+        const saved = await ipcRenderer.invoke('settings:set-sync-interval', { minutes: nextMinutes });
+        settingsState = {
+            ...settingsState,
+            ...(saved || {}),
+        };
+        renderSettings();
+        settingsMeta.innerText = 'Saved. New cadence is active now.';
+    } catch (error) {
+        console.error('Failed to save sync interval', error);
+        renderRuntimeWarning('Could not save sync cadence.');
+    } finally {
+        renderSettings();
+    }
+}
+
+function renderRuntimeWarning(warning) {
+    if (runtimeWarningTimer) {
+        clearTimeout(runtimeWarningTimer);
+        runtimeWarningTimer = null;
+    }
+
+    const message = typeof warning === 'string'
+        ? warning
+        : warning && typeof warning.message === 'string'
+            ? warning.message
+            : '';
+
+    if (!message) {
+        runtimeWarning.innerText = '';
+        runtimeWarning.classList.add('hidden');
+        scheduleExpandedHeightSync();
+        return;
+    }
+
+    runtimeWarning.innerText = message;
+    runtimeWarning.classList.remove('hidden');
+    scheduleExpandedHeightSync();
+    runtimeWarningTimer = setTimeout(() => {
+        runtimeWarning.innerText = '';
+        runtimeWarning.classList.add('hidden');
+        scheduleExpandedHeightSync();
+        runtimeWarningTimer = null;
+    }, 9000);
+}
+
 function renderProviderToggles() {
     const providers = Object.entries(providerVisibility);
     if (!providers.length) {
         providerToggles.innerHTML = '';
         return;
     }
+
+    providers.sort(([a], [b]) => {
+        const order = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'minimax', 'opencode'];
+        const ai = order.indexOf(a);
+        const bi = order.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.localeCompare(b);
+    });
 
     providerToggles.innerHTML = providers.map(([key, info]) => {
         const activeClass = info.visible ? ' active' : '';
@@ -1028,7 +1179,8 @@ async function loadProviderVisibility() {
 Promise.all([
     ipcRenderer.invoke('island:get-data'),
     ipcRenderer.invoke('island:get-intervention'),
-    loadProviderVisibility()
+    loadProviderVisibility(),
+    loadSettings()
 ]).then(([data, intervention]) => {
     renderShortcuts();
     renderSummary(data);

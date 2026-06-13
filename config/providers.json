@@ -23,6 +23,10 @@
     "deepseek": {
       "name": "DeepSeek",
       "currency": "CNY"
+    },
+    "opencode": {
+      "name": "OpenCode",
+      "currency": "USD"
     }
   },
   "accounts": [
@@ -61,6 +65,12 @@
       "provider": "deepseek",
       "label": "DeepSeek",
       "billingMode": "prepaid"
+    },
+    {
+      "id": "opencode-local",
+      "provider": "opencode",
+      "label": "OpenCode",
+      "billingMode": "zen_plan"
     }
   ]
 }
