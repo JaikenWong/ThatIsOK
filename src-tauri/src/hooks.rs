@@ -280,8 +280,30 @@ fn inject_claude_hooks(exe_path: &Path) -> Result<(), String> {
 }
 
 fn build_tauri_hook_command(exe_path: &Path, source: &str, event_name: &str) -> String {
-    let escaped = exe_path.display().to_string().replace('"', "\\\"");
+    #[cfg(windows)]
+    let short = short_path_name(exe_path);
+    #[cfg(not(windows))]
+    let short = exe_path.display().to_string();
+    let escaped = short.replace('"', "\\\"");
     format!("\"{escaped}\" --hook-source {source} --hook-event {event_name}")
+}
+
+#[cfg(windows)]
+fn short_path_name(path: &Path) -> String {
+    use std::ffi::OsStr;
+    use std::os::windows::ffi::OsStrExt;
+    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let mut buf = vec![0u16; 512];
+    let len = unsafe {
+        extern "system" {
+            fn GetShortPathNameW(lpszLongPath: *const u16, lpszShortPath: *mut u16, cchBuffer: u32) -> u32;
+        }
+        GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32)
+    };
+    if len == 0 || len as usize > buf.len() {
+        return path.display().to_string();
+    }
+    String::from_utf16_lossy(&buf[..len as usize])
 }
 
 fn is_managed_hook_value(value: &Value) -> bool {
