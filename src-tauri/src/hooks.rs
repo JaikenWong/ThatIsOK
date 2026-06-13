@@ -22,14 +22,32 @@ pub fn run_hook_bridge_from_args() -> bool {
 
     let source = get_cli_arg(&args, "--hook-source").unwrap_or_else(|| "unknown".to_string());
     let event_name = get_cli_arg(&args, "--hook-event").unwrap_or_else(|| "unknown".to_string());
-    let mut input = String::new();
-    let _ = io::stdin().read_to_string(&mut input);
+    let input = read_stdin_json();
 
     if let Err(error) = run_hook_bridge(&source, &event_name, &input) {
         eprintln!("ThatIsOK hook bridge failed: {error}");
         process::exit(0);
     }
     true
+}
+
+fn read_stdin_json() -> String {
+    let mut buffer = Vec::new();
+    let mut chunk = [0u8; 4096];
+    let stdin = io::stdin();
+    loop {
+        match stdin.lock().read(&mut chunk) {
+            Ok(0) => break,
+            Ok(n) => {
+                buffer.extend_from_slice(&chunk[..n]);
+                if serde_json::from_slice::<Value>(&buffer).is_ok() {
+                    break;
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    String::from_utf8_lossy(&buffer).to_string()
 }
 
 pub(crate) fn inject_agent_hooks(app: &AppHandle) {
