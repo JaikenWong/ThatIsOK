@@ -1,97 +1,142 @@
 # ThatIsOK
 
-ThatIsOK is a local desktop approval and usage cockpit for AI coding tools. It keeps a small floating island on screen for permission decisions and tracks provider usage across local agents.
+> Desktop approval & usage cockpit for AI coding agents — floating, local, no telemetry.
 
-## Why it exists
+ThatIsOK is a **floating island** that lives on your desktop. It intercepts permission requests from Claude Code and Codex, and tracks usage balances across all your AI coding tools in one glance.
 
-- Keep approval prompts visible without alt-tabbing back to the terminal
-- Track usage and balance across multiple coding agents and providers in one place
-- Store everything locally with no telemetry
+<p align="center">
+  <em>Screenshot coming soon — the island shows provider rings (collapsed) or a full panel with toggle switches, progress bars, and session logs (expanded).</em>
+</p>
 
-## Highlights
+## What it does
 
-- Floating always-on-top approval island with compact and expanded modes
-- Approve, approve always, or deny with global shortcuts
-- Hook bridge support for Claude Code and Codex
-- Usage and balance sync for Codex, Claude Code, Cursor, MiniMax, Gemini, and DeepSeek
-- Tray integration, session tracking, provider visibility toggles, and local-only persistence
+- **Permission approval** — approve, approve-always, or deny tool-use requests without tabbing back to terminal
+- **Usage tracking** — real-time progress bars for session / weekly / monthly quotas across providers
+- **Balance sync** — stays current with provider APIs so you know when you're about to run out
+- **Always on top** — a transparent, draggable island that never gets buried under other windows
 
-## Platform status
+## Supported providers
 
-- Primary target: Windows
-- Also supported: macOS
-- Active desktop runtime: Tauri 2
+### Approval (hook bridge)
 
-## Supported agents and providers
+| Agent | Status | Setup |
+|-------|--------|-------|
+| Claude Code | ✅ | Auto-injected on startup |
+| Codex | ✅ | Auto-injected on startup |
+| OpenCode | ✅ | Plugin install required ([see below](#opencode)) |
 
-### Approval / hook support
+### Usage & balance
 
-| Agent | Status |
-| --- | --- |
-| Claude Code | Supported |
-| Codex | Supported |
+| Provider | Tracks | Source |
+|----------|--------|--------|
+| Codex | 5h / 7d rate limits | Local auth + session files |
+| Claude Code | Session cost | Local JSONL transcripts |
+| Cursor | Usage summary | Local app storage |
+| Gemini | Usage data | Local login + session data |
+| DeepSeek | API balance | `DEEPSEEK_API_KEY` |
+| MiniMax | Token plan balance | `MINIMAX_API_KEY` |
+| OpenCode Go | $12/$30/$60 limits | Local SQLite (`opencode.db`) |
+| OpenCode Zen | Model availability | OpenCode API key |
 
-### Usage / balance sync
+## Install
 
-| Provider | Source |
-| --- | --- |
-| Codex | local auth and session data |
-| Claude Code | local JSONL transcripts |
-| Cursor | local app storage |
-| MiniMax | local and API-backed usage fetch |
-| Gemini | local login and session data |
-| DeepSeek | API balance |
+### From release (recommended)
 
-## Quick start
+Download the latest `.dmg` (macOS) or `.exe` (Windows) from [Releases](https://github.com/anomalyco/ThatIsOK/releases).
+
+### From source
 
 ```bash
+git clone https://github.com/anomalyco/ThatIsOK.git
+cd ThatIsOK
 npm install
-npm run tauri:dev
+npm run tauri:dev     # dev
+npm run tauri:build   # release build → src-tauri/target/release/bundle/
 ```
 
-## Build
+**Prerequisites:** Node.js 18+, Rust toolchain (rustup), and platform build tools (Xcode on macOS, MSVC on Windows).
 
-```bash
-npm run tauri:build
-```
+## Usage
 
-## Global shortcuts
+### The island
 
-- `Ctrl/Cmd+Shift+Space`: toggle island
-- `Ctrl/Cmd+Opt+A`: approve
-- `Ctrl/Cmd+Opt+L`: approve always
-- `Ctrl/Cmd+Opt+D`: deny
+| Mode | What you see |
+|------|-------------|
+| **Collapsed** | Logo + provider progress rings. Each ring is a provider; fill = quota used. Hover circles for exact numbers, hover `?` badges for setup tips. |
+| **Expanded** | Click the island to expand. Full panel with toggle switches (show/hide providers), per-provider progress bars with dollar amounts and reset times, session logs, sync cadence setting. Click outside or toggle to collapse. |
 
-## Project layout
+### Global shortcuts
 
-```text
-ThatIsOK/
-|- src-tauri/    active Tauri 2 app runtime and backend
-|- renderer/     floating island UI loaded by Tauri webview
-|- config/       providers and defaults
-`- assets/       app icons and static assets
-```
+| Shortcut | Action |
+|----------|--------|
+| `Ctrl/Cmd+Shift+Space` | Toggle island visibility |
+| `Ctrl/Cmd+Opt+A` | Approve current permission request |
+| `Ctrl/Cmd+Opt+L` | Approve always (persistent rule) |
+| `Ctrl/Cmd+Opt+D` | Deny current permission request |
 
-## Hook installation
+### Tray menu
 
-On startup, the app injects managed hook entries into:
+Right-click the tray icon (macOS menu bar / Windows system tray) for **Open**, **Sync Now**, and **Quit**.
+
+## How hooks work
+
+On startup, ThatIsOK writes managed entries into:
 
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
 
-Managed entries now point to the packaged ThatIsOK executable with `--hook-source` and `--hook-event`.
+When a tool-use permission is requested, the agent invokes the ThatIsOK binary with `--hook-source` and `--hook-event`. A TCP server on `127.0.0.1:45873` receives the event, displays the approval panel, and returns the decision.
 
-## Notes
+### OpenCode plugin
 
-- Runtime code is split across `src-tauri/src/` modules for hooks, shortcuts, providers, and UI state
-- Local hook IPC uses `127.0.0.1:45873`
-- `renderer/dashboard/` was removed because it was no longer wired to the active runtime
+Copy `src-tauri/plugins/thatisok-opencode.js` to `~/.config/opencode/plugins/`, then add to `~/.config/opencode/config.json`:
 
-## Docs
+```json
+{ "plugin": ["file:///Users/YOU/.config/opencode/plugins/thatisok-opencode.js"] }
+```
 
-- Chinese README: [README.zh-CN.md](./README.zh-CN.md)
-- Windows release gate: [docs/windows-validation-checklist.md](./docs/windows-validation-checklist.md)
+## Configuration
+
+- **Sync interval** — expand the island, use `+/-` buttons in the settings row (5 / 10 / 15 / 30 / 60 minutes)
+- **Provider visibility** — toggle switches in the expanded panel; hidden providers are excluded from rings and card list
+- **Approval rules** — "Approve Always" creates persistent rules stored in `~/.config/ThatIsOK/approval-rules.json`
+- **Hide from Dock** — macOS: app runs as accessory, tray-icon only. Windows: `skipTaskbar` by default.
+
+## Privacy
+
+- All data is **local** — no telemetry, no cloud sync, no analytics
+- Provider credentials are read from their standard locations (`.codex/auth.json`, `~/.local/share/opencode/auth.json`, `DEEPSEEK_API_KEY`, etc.) and **never transmitted** except to the provider's own API for balance queries
+- Hook events are processed on local TCP and immediately discarded
+
+## Troubleshooting
+
+| Problem | Check |
+|---------|-------|
+| Provider shows "Stale" | Re-login to the provider, then click **Sync** |
+| No usage bars appear | Provider may need a local login before data is available — hover the `?` badge for setup instructions |
+| Ring shows half / cut off | Reduce number of visible providers; max 5 rings fit in collapsed mode |
+| Hooks not working | Restart the coding agent after ThatIsOK has started |
+| Island not showing | `Ctrl/Cmd+Shift+Space` toggles visibility; check tray icon |
+
+## Tech stack
+
+- **Desktop framework:** [Tauri 2](https://tauri.app) (Rust + webview)
+- **Frontend:** vanilla JS + CSS in a transparent webview
+- **Storage:** local JSON files, SQLite (for OpenCode Go history)
+- **IPC:** Tauri commands + local TCP server for hook bridge
+
+## Platform
+
+| Platform | Status |
+|----------|--------|
+| Windows | Primary target |
+| macOS | Fully supported |
+| Linux | Not tested (contributions welcome) |
 
 ## License
 
 ISC
+
+---
+
+[中文文档](./README.zh-CN.md) · [Windows 检查清单](./docs/windows-validation-checklist.md)
