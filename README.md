@@ -42,12 +42,20 @@ ThatIsOK is a **floating island** that lives on your desktop. It intercepts perm
 
 ### From release (recommended)
 
-Download the latest `.dmg` (macOS) or `.exe` (Windows) from [Releases](https://github.com/anomalyco/ThatIsOK/releases).
+Download the latest `.dmg` (macOS) or `.exe` (Windows) from [Releases](https://github.com/JaikenWong/ThatIsOK/releases).
+
+**macOS users:** the app is not Apple-notarized. After installing, run this once to bypass Gatekeeper:
+
+```bash
+xattr -cr /Applications/ThatIsOK.app
+```
+
+Alternatively, right-click the app in Finder → **Open**.
 
 ### From source
 
 ```bash
-git clone https://github.com/anomalyco/ThatIsOK.git
+git clone https://github.com/JaikenWong/ThatIsOK.git
 cd ThatIsOK
 npm install
 npm run tauri:dev     # dev

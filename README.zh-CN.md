@@ -42,12 +42,20 @@ ThatIsOK 是一个常驻桌面的**浮动小岛**。它能拦截 Claude Code 和
 
 ### 发行版（推荐）
 
-从 [Releases](https://github.com/anomalyco/ThatIsOK/releases) 下载最新 `.dmg`（macOS）或 `.exe`（Windows）。
+从 [Releases](https://github.com/JaikenWong/ThatIsOK/releases) 下载最新 `.dmg`（macOS）或 `.exe`（Windows）。
+
+**macOS 用户注意：** 应用未经过 Apple 公证，安装后需运行一次：
+
+```bash
+xattr -cr /Applications/ThatIsOK.app
+```
+
+或在 Finder 中右键点击 app → **打开**。
 
 ### 从源码编译
 
 ```bash
-git clone https://github.com/anomalyco/ThatIsOK.git
+git clone https://github.com/JaikenWong/ThatIsOK.git
 cd ThatIsOK
 npm install
 npm run tauri:dev     # 开发
