@@ -1363,7 +1363,6 @@ function showUpdateBanner(status, message) {
         default: break;
     }
 }
-}
 
 ipcRenderer.on('update-status', (_, payload) => {
     showUpdateBanner(payload.status, payload.version || payload.message || '');
