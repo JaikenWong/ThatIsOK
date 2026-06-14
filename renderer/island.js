@@ -151,7 +151,8 @@ function createIpcRendererAdapter() {
         'island:drag-end': () => tauri.core.invoke('island_drag_end'),
         'intervention:respond': (decision) => tauri.core.invoke('intervention_respond', { decision }),
         'providers:set-visibility': (provider, visible) => tauri.core.invoke('providers_set_visibility', { provider, visible }),
-        'island:set-pill-width': (width) => tauri.core.invoke('island_set_pill_width', { width })
+        'island:set-pill-width': (width) => tauri.core.invoke('island_set_pill_width', { width }),
+        'app:restart': () => tauri.core.invoke('app_restart')
     };
 
     return {
@@ -1313,24 +1314,27 @@ function showUpdateBanner(status, message) {
     if (!el) return;
     switch (status) {
         case 'checking':
-            el.textContent = 'Checking for updates...';
+            el.innerHTML = 'Checking for updates...';
             el.classList.add('update-banner');
             break;
         case 'downloading':
-            el.textContent = `Downloading v${message}...`;
+            el.innerHTML = `Downloading v${escapeHtml(message)}...`;
             el.classList.add('update-banner');
             break;
         case 'installed':
-            el.textContent = 'Update installed. Restart to apply.';
+            el.innerHTML = 'Update ready. <button id="restartButton" class="btn sync">Restart</button>';
             el.classList.add('update-banner');
+            document.getElementById('restartButton')?.addEventListener('click', () => {
+                ipcRenderer.send('app:restart');
+            });
             break;
         case 'up-to-date':
-            el.textContent = 'ThatIsOK is up to date.';
+            el.innerHTML = 'ThatIsOK is up to date.';
             el.classList.add('update-banner');
-            setTimeout(() => { el.textContent = ''; el.classList.remove('update-banner'); }, 4000);
+            setTimeout(() => { el.innerHTML = ''; el.classList.remove('update-banner'); }, 4000);
             break;
         case 'error':
-            el.textContent = `Update failed: ${message}`;
+            el.innerHTML = `Update failed: ${escapeHtml(message)}`;
             el.classList.add('update-banner');
             break;
         default: break;

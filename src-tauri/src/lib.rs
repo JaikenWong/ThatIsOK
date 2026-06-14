@@ -1125,6 +1125,13 @@ fn island_set_pill_width(app: AppHandle, width: f64) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn app_restart(app: AppHandle) -> Result<(), String> {
+    app.restart();
+    #[allow(unreachable_code)]
+    Ok(())
+}
+
+#[tauri::command]
 fn island_drag_start(app: AppHandle, mouse: MousePoint) -> Result<(), String> {
     let window = main_window(&app)?;
     let pos = window.outer_position().map_err(|err| err.to_string())?;
@@ -1380,7 +1387,8 @@ pub fn run() {
             providers_get_visibility,
             providers_set_visibility,
             settings_get,
-            settings_set_sync_interval
+            settings_set_sync_interval,
+            app_restart
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -1456,6 +1464,7 @@ pub fn run() {
                                     "update" => {
                                         use tauri_plugin_updater::UpdaterExt;
                                         let h = app_handle_inner.clone();
+                                        let _ = h.emit("island-force-expand", ());
                                         let _ = h.emit("update-status", json!({"status": "checking"}));
                                         tauri::async_runtime::spawn(async move {
                                             match h.updater() {
