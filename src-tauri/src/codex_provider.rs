@@ -321,32 +321,36 @@ fn build_codex_lines(usage: Option<&Value>) -> Vec<Value> {
     };
     let mut lines = Vec::new();
 
-    // Prefer response headers (primary source in OpenUsage)
     let header_primary = data.get("header_primary_used_pct").and_then(read_number_value);
     let header_secondary = data.get("header_secondary_used_pct").and_then(read_number_value);
 
     if let Some(pct) = header_primary {
+        let remaining = (100.0 - pct).max(0.0);
         lines.push(json!({
             "type": "progress",
             "label": "Session",
-            "used": pct,
+            "used": remaining,
             "limit": 100.0,
-            "format": { "kind": "percent" },
-            "subtitle": format!("{}% used", pct.round()),
+            "format": { "kind": "percent", "mode": "remaining" },
+            "subtitle": format!("{}% left", remaining.round()),
         }));
     }
     if let Some(pct) = header_secondary {
+        let remaining = (100.0 - pct).max(0.0);
         lines.push(json!({
             "type": "progress",
             "label": "Weekly",
-            "used": pct,
+            "used": remaining,
             "limit": 100.0,
-            "format": { "kind": "percent" },
-            "subtitle": format!("{}% used", pct.round()),
+            "format": { "kind": "percent", "mode": "remaining" },
+            "subtitle": format!("{}% left", remaining.round()),
         }));
     }
 
-    if !lines.is_empty() {
+    let has_primary = header_primary.is_some();
+    let has_secondary = header_secondary.is_some();
+
+    if has_primary && has_secondary {
         return lines;
     }
 
@@ -358,79 +362,85 @@ fn build_codex_lines(usage: Option<&Value>) -> Vec<Value> {
         .and_then(|r| r.get("secondary_window"))
         .or_else(|| rate_limit.and_then(|r| r.get("secondaryWindow")));
 
-    if let Some(pw) = primary {
-        let used_pct = pw
-            .get("used_percent")
-            .or_else(|| pw.get("usedPercent"))
-            .and_then(read_number_value)
-            .unwrap_or(0.0);
-        let remaining_pct = (100.0 - used_pct).max(0.0);
-        let reset_at = pw
-            .get("reset_at")
-            .or_else(|| pw.get("resetAt"))
-            .and_then(read_number_value)
-            .and_then(epoch_to_ms)
-            .map(iso_from_ms);
-        lines.push(json!({
-            "type": "progress",
-            "label": "5h window",
-            "used": remaining_pct,
-            "limit": 100.0,
-            "format": { "kind": "percent", "mode": "remaining" },
-            "subtitle": format!("{}% left", remaining_pct.round()),
-            "resetsAt": reset_at
-        }));
+    if !has_primary {
+        if let Some(pw) = primary {
+            let used_pct = pw
+                .get("used_percent")
+                .or_else(|| pw.get("usedPercent"))
+                .and_then(read_number_value)
+                .unwrap_or(0.0);
+            let remaining_pct = (100.0 - used_pct).max(0.0);
+            let reset_at = pw
+                .get("reset_at")
+                .or_else(|| pw.get("resetAt"))
+                .and_then(read_number_value)
+                .and_then(epoch_to_ms)
+                .map(iso_from_ms);
+            lines.push(json!({
+                "type": "progress",
+                "label": "5h window",
+                "used": remaining_pct,
+                "limit": 100.0,
+                "format": { "kind": "percent", "mode": "remaining" },
+                "subtitle": format!("{}% left", remaining_pct.round()),
+                "resetsAt": reset_at
+            }));
+        }
     }
 
-    if let Some(sw) = secondary {
-        let used_pct = sw
-            .get("used_percent")
-            .or_else(|| sw.get("usedPercent"))
-            .and_then(read_number_value)
-            .unwrap_or(0.0);
-        let remaining_pct = (100.0 - used_pct).max(0.0);
-        let reset_at = sw
-            .get("reset_at")
-            .or_else(|| sw.get("resetAt"))
-            .and_then(read_number_value)
-            .and_then(epoch_to_ms)
-            .map(iso_from_ms);
-        lines.push(json!({
-            "type": "progress",
-            "label": "7d window",
-            "used": remaining_pct,
-            "limit": 100.0,
-            "format": { "kind": "percent", "mode": "remaining" },
-            "subtitle": format!("{}% left", remaining_pct.round()),
-            "resetsAt": reset_at
-        }));
+    if !has_secondary {
+        if let Some(sw) = secondary {
+            let used_pct = sw
+                .get("used_percent")
+                .or_else(|| sw.get("usedPercent"))
+                .and_then(read_number_value)
+                .unwrap_or(0.0);
+            let remaining_pct = (100.0 - used_pct).max(0.0);
+            let reset_at = sw
+                .get("reset_at")
+                .or_else(|| sw.get("resetAt"))
+                .and_then(read_number_value)
+                .and_then(epoch_to_ms)
+                .map(iso_from_ms);
+            lines.push(json!({
+                "type": "progress",
+                "label": "7d window",
+                "used": remaining_pct,
+                "limit": 100.0,
+                "format": { "kind": "percent", "mode": "remaining" },
+                "subtitle": format!("{}% left", remaining_pct.round()),
+                "resetsAt": reset_at
+            }));
+        }
     }
 
-    if lines.is_empty() {
-        if let Some(rl) = rate_limit {
-            if let Some(primary) = rl.get("primary_window").or_else(|| rl.get("primaryWindow")) {
-                let used_pct = primary
-                    .get("used_percent")
-                    .or_else(|| primary.get("usedPercent"))
-                    .and_then(read_number_value)
-                    .unwrap_or(0.0);
-                let remaining_pct = (100.0 - used_pct).max(0.0);
-                let reset_at = primary
-                    .get("resets_at")
-                    .or_else(|| primary.get("resetAt"))
-                    .or_else(|| primary.get("resets_at"))
-                    .and_then(Value::as_str)
-                    .map(String::from);
-                lines.push(json!({
-                    "type": "progress",
-                    "label": "Rate limit",
-                    "used": remaining_pct,
-                    "limit": 100.0,
-                    "format": { "kind": "percent", "mode": "remaining" },
-                    "subtitle": format!("{}% left", remaining_pct.round()),
-                    "resetsAt": reset_at
-                }));
-            }
+    if !lines.is_empty() {
+        return lines;
+    }
+
+    if let Some(rl) = rate_limit {
+        if let Some(primary) = rl.get("primary_window").or_else(|| rl.get("primaryWindow")) {
+            let used_pct = primary
+                .get("used_percent")
+                .or_else(|| primary.get("usedPercent"))
+                .and_then(read_number_value)
+                .unwrap_or(0.0);
+            let remaining_pct = (100.0 - used_pct).max(0.0);
+            let reset_at = primary
+                .get("resets_at")
+                .or_else(|| primary.get("resetAt"))
+                .or_else(|| primary.get("resets_at"))
+                .and_then(Value::as_str)
+                .map(String::from);
+            lines.push(json!({
+                "type": "progress",
+                "label": "Rate limit",
+                "used": remaining_pct,
+                "limit": 100.0,
+                "format": { "kind": "percent", "mode": "remaining" },
+                "subtitle": format!("{}% left", remaining_pct.round()),
+                "resetsAt": reset_at
+            }));
         }
     }
 

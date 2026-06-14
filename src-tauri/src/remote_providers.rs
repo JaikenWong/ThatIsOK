@@ -223,10 +223,6 @@ fn build_minimax_snapshot(
         let percent = remaining_percent?;
         (100.0 - percent, 100.0, percent, Some(percent), true)
     } else {
-        let usage_field = read_number_field(
-            chosen,
-            &["current_interval_usage_count", "currentIntervalUsageCount"],
-        );
         let remaining_count = read_number_field(
             chosen,
             &[
@@ -249,7 +245,7 @@ fn build_minimax_snapshot(
                 "used",
             ],
         );
-        let inferred_remaining = remaining_count.or(usage_field);
+        let inferred_remaining = remaining_count;
         let raw_used = explicit_used
             .unwrap_or_else(|| (total - inferred_remaining.unwrap_or(total)).clamp(0.0, total));
         let raw_remaining = inferred_remaining.unwrap_or(total - raw_used).max(0.0);
@@ -266,13 +262,16 @@ fn build_minimax_snapshot(
     let resets_at = read_number_field(chosen, &["end_time", "endTime"])
         .and_then(epoch_to_ms)
         .map(iso_from_ms);
+    let weekly_active = read_number_field(chosen, &["current_weekly_status", "currentWeeklyStatus"])
+        .map(|s| s as i64)
+        == Some(1);
     let plan = infer_minimax_plan(total, region).unwrap_or_else(|| "MiniMax".to_string());
     let plan_with_region = format!("{plan} ({region})");
-    let line = if is_percent_mode {
+    let line_5h = if is_percent_mode {
         let pct = remaining_percent_out.unwrap_or(0.0).clamp(0.0, 100.0);
         json!({
             "type": "progress",
-            "label": "Session",
+            "label": "5h Session",
             "used": pct,
             "limit": 100,
             "format": { "kind": "percent", "mode": "remaining" },
@@ -282,7 +281,7 @@ fn build_minimax_snapshot(
     } else {
         json!({
             "type": "progress",
-            "label": "Session",
+            "label": "5h Session",
             "used": remaining,
             "limit": total_out,
             "format": { "kind": "count", "mode": "remaining", "suffix": "prompts" },
@@ -290,6 +289,70 @@ fn build_minimax_snapshot(
             "resetsAt": resets_at
         })
     };
+
+    let mut lines = vec![line_5h];
+
+    if weekly_active {
+        let w_total = read_number_field(
+            chosen,
+            &["current_weekly_total_count", "currentWeeklyTotalCount"],
+        )
+        .unwrap_or(0.0);
+        let w_remaining_percent = read_number_field(
+            chosen,
+            &["current_weekly_remaining_percent", "currentWeeklyRemainingPercent"],
+        );
+        let w_has_count = w_total > 0.0 && (w_total * display_multiplier).round() > 0.0;
+        let w_resets_at = read_number_field(chosen, &["weekly_end_time", "weeklyEndTime"])
+            .and_then(epoch_to_ms)
+            .map(iso_from_ms);
+
+        let line_7d = if !w_has_count {
+            let w_pct = w_remaining_percent.unwrap_or(0.0).clamp(0.0, 100.0);
+            json!({
+                "type": "progress",
+                "label": "7d Session",
+                "used": w_pct,
+                "limit": 100,
+                "format": { "kind": "percent", "mode": "remaining" },
+                "subtitle": format!("{}% left", w_pct.round()),
+                "resetsAt": w_resets_at
+            })
+        } else {
+            let w_remaining_count = read_number_field(
+                chosen,
+                &[
+                    "current_weekly_remaining_count",
+                    "currentWeeklyRemainingCount",
+                    "current_weekly_remains_count",
+                    "currentWeeklyRemainsCount",
+                    "weekly_remaining_count",
+                    "weeklyRemainingCount",
+                ],
+            );
+            let w_explicit_used = read_number_field(
+                chosen,
+                &["current_weekly_used_count", "currentWeeklyUsedCount"],
+            );
+            let w_inferred_remaining = w_remaining_count;
+            let w_raw_used = w_explicit_used.unwrap_or_else(|| {
+                (w_total - w_inferred_remaining.unwrap_or(w_total)).clamp(0.0, w_total)
+            });
+            let w_raw_remaining = w_inferred_remaining.unwrap_or(w_total - w_raw_used).max(0.0);
+            let w_remaining = (w_raw_remaining * display_multiplier).round();
+            let w_total_out = (w_total * display_multiplier).round();
+            json!({
+                "type": "progress",
+                "label": "7d Session",
+                "used": w_remaining,
+                "limit": w_total_out,
+                "format": { "kind": "count", "mode": "remaining", "suffix": "prompts" },
+                "subtitle": format!("{} left", w_remaining.round()),
+                "resetsAt": w_resets_at
+            })
+        };
+        lines.push(line_7d);
+    }
 
     Some(json!({
         "accountId": account_id,
@@ -310,7 +373,7 @@ fn build_minimax_snapshot(
             "isPercentMode": is_percent_mode,
             "resetsAt": resets_at
         },
-        "lines": [line],
+        "lines": lines,
         "meta": {
             "region": region,
             "baseUrl": base_url,
@@ -325,15 +388,30 @@ fn pick_minimax_remain<'a>(remains: &'a [Value], region: &str) -> Option<&'a Val
     } else {
         1.0
     };
+    let mut count_any = None;
+    let mut count_general = None;
     let mut percent_any = None;
     let mut percent_general = None;
     for item in remains {
+        let model = item
+            .get("model_name")
+            .or_else(|| item.get("modelName"))
+            .and_then(Value::as_str);
+        let is_general = model == Some("general");
         let total = read_number_field(
             item,
             &["current_interval_total_count", "currentIntervalTotalCount"],
         );
         if total.is_some_and(|total| total > 0.0 && (total * multiplier).round() > 0.0) {
-            return Some(item);
+            if is_general {
+                return Some(item);
+            }
+            if count_any.is_none() {
+                count_any = Some(item);
+            }
+            if count_general.is_none() && is_general {
+                count_general = Some(item);
+            }
         }
         let percent = read_number_field(
             item,
@@ -343,16 +421,12 @@ fn pick_minimax_remain<'a>(remains: &'a [Value], region: &str) -> Option<&'a Val
             if percent_any.is_none() {
                 percent_any = Some(item);
             }
-            let model = item
-                .get("model_name")
-                .or_else(|| item.get("modelName"))
-                .and_then(Value::as_str);
-            if percent_general.is_none() && model == Some("general") {
+            if percent_general.is_none() && is_general {
                 percent_general = Some(item);
             }
         }
     }
-    percent_general.or(percent_any)
+    count_general.or(count_any).or(percent_general).or(percent_any)
 }
 
 fn error_snapshot(account_id: &str, provider: &str, label: &str, message: String) -> Value {

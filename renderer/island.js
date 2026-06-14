@@ -649,7 +649,7 @@ function renderAccountHeadline(account) {
         return account.plan || 'ChatGPT login';
     }
 
-    if (account.provider === 'claude' && account.plan) {
+    if (account.plan) {
         return account.plan;
     }
 
@@ -1225,7 +1225,7 @@ function getProviderToggleTip(provider) {
     }
 
     if (account.status === 'error' || account.status === 'stale') {
-        return account.message || getProviderSetupTip(provider);
+        return account.message || null;
     }
 
     if (!Array.isArray(account.lines) || account.lines.length === 0) {
