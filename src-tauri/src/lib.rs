@@ -1413,11 +1413,7 @@ pub fn run() {
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let version = app.package_info().version.to_string();
-                let version_item = MenuItemBuilder::with_id("version", format!("ThatIsOK v{version}"))
-                    .enabled(false)
-                    .build(app)
-                    .map_err(|e| format!("tray menu: {e}")).ok();
-                let update_item = MenuItemBuilder::with_id("update", "Check for Updates")
+                let update_item = MenuItemBuilder::with_id("update", format!("ThatIsOK v{version}"))
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let sep = PredefinedMenuItem::separator(app)
@@ -1426,11 +1422,11 @@ pub fn run() {
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
 
-                if let (Some(open), Some(sync_item), Some(version_item), Some(update_item), Some(sep), Some(quit_item)) =
-                    (open, sync_item, version_item, update_item, sep, quit_item)
+                if let (Some(open), Some(sync_item), Some(update_item), Some(sep), Some(quit_item)) =
+                    (open, sync_item, update_item, sep, quit_item)
                 {
                     let menu = MenuBuilder::new(app)
-                        .items(&[&open, &sync_item, &version_item, &update_item, &sep, &quit_item])
+                        .items(&[&open, &sync_item, &update_item, &sep, &quit_item])
                         .build()
                         .map_err(|e| format!("tray menu: {e}")).ok();
 
