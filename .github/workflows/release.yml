@@ -50,7 +50,7 @@ jobs:
             exit 0
           fi
           DMG="ThatIsOK_${VERSION}_aarch64.dmg"
-          cat > latest.json << 'JSONEOF'
+          cat > latest.json <<JSONEOF
           {
             "version": "${VERSION}",
             "notes": "Bug fixes and improvements.",
