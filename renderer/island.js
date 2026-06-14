@@ -1317,6 +1317,10 @@ function showUpdateBanner(status, message) {
             el.innerHTML = 'Checking for updates...';
             el.classList.add('update-banner');
             break;
+        case 'available':
+            el.innerHTML = `v${escapeHtml(message)} available. Click ThatIsOK v1.0.0 in tray to update.`;
+            el.classList.add('update-banner');
+            break;
         case 'downloading':
             el.innerHTML = `Downloading v${escapeHtml(message)}...`;
             el.classList.add('update-banner');

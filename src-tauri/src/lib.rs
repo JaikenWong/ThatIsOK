@@ -1400,6 +1400,20 @@ pub fn run() {
             position_initial(&window).map_err(Box::<dyn std::error::Error>::from)?;
             window.show().map_err(Box::<dyn std::error::Error>::from)?;
             initialize_sync_interval(app.handle());
+
+            // Auto-check for updates on startup
+            {
+                use tauri_plugin_updater::UpdaterExt;
+                let h = app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Ok(updater) = h.updater() {
+                        if let Ok(Some(update)) = updater.check().await {
+                            let _ = h.emit("update-status", json!({"status": "available", "version": update.version.to_string()}));
+                        }
+                    }
+                });
+            }
+
             shortcuts::register_shortcuts(app.handle());
 
             // Tray icon
