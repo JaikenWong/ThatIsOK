@@ -437,13 +437,28 @@ fn read_gemini_today_stats(gemini_dir: &Path) -> GeminiTodayStats {
 
 pub(crate) fn fetch_kiro_snapshot(account_id: &str, label: &str) -> Option<Value> {
     let home = dirs::home_dir()?;
-    let db_path = home
-        .join("Library")
-        .join("Application Support")
-        .join("Kiro")
-        .join("User")
-        .join("globalStorage")
-        .join("state.vscdb");
+    let db_path = if cfg!(target_os = "macos") {
+        home.join("Library")
+            .join("Application Support")
+            .join("Kiro")
+            .join("User")
+            .join("globalStorage")
+            .join("state.vscdb")
+    } else if cfg!(target_os = "windows") {
+        dirs::data_dir()
+            .or_else(|| Some(home.join("AppData").join("Roaming")))?
+            .join("Kiro")
+            .join("User")
+            .join("globalStorage")
+            .join("state.vscdb")
+    } else {
+        dirs::config_dir()
+            .unwrap_or_else(|| home.join(".config"))
+            .join("Kiro")
+            .join("User")
+            .join("globalStorage")
+            .join("state.vscdb")
+    };
     if !db_path.exists() {
         return None;
     }

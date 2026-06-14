@@ -157,8 +157,9 @@ fn run_hook_bridge(source: &str, event_name: &str, input: &str) -> Result<(), St
     stream
         .write_all(format!("{payload}\n").as_bytes())
         .map_err(|err| err.to_string())?;
+    let read_timeout = if event_name.eq_ignore_ascii_case("PermissionRequest") { 1800 } else { 5 };
     stream
-        .set_read_timeout(Some(std::time::Duration::from_secs(5)))
+        .set_read_timeout(Some(std::time::Duration::from_secs(read_timeout)))
         .map_err(|err| err.to_string())?;
     let mut reader = std::io::BufReader::new(stream);
     let mut line = String::new();
@@ -336,11 +337,11 @@ fn is_managed_hook_value(value: &Value) -> bool {
 
 fn map_session_status(event_name: &str) -> String {
     match event_name.to_lowercase().as_str() {
-        "sessionstart" => "active".to_string(),
-        "stop" | "sessionend" => "done".to_string(),
-        "permissionrequest" => "waiting".to_string(),
-        "posttooluse" | "userpromptsubmit" => "active".to_string(),
-        _ => "idle".to_string(),
+        "sessionstart" => "Active".to_string(),
+        "stop" | "sessionend" => "Done".to_string(),
+        "permissionrequest" => "Awaiting approval".to_string(),
+        "posttooluse" | "userpromptsubmit" => "Active".to_string(),
+        _ => String::new(),
     }
 }
 
@@ -403,7 +404,10 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
             .or_insert_with(SessionInfo::default);
         entry.id = session_id.to_string();
         entry.source = source.to_string();
-        entry.status = map_session_status(event_name);
+        let new_status = map_session_status(event_name);
+        if !new_status.is_empty() {
+            entry.status = new_status;
+        }
         entry.updated_at = now_millis();
         entry.last_event = event_name.to_string();
     }

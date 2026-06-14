@@ -363,7 +363,7 @@ fn build_config_account(account: &Value, setting: Option<&Value>) -> Value {
         "meta": {
             "manualPlan": manual_plan
         },
-        "message": "Tauri sync pending for this provider."
+        "message": "Not connected — run Sync to check usage"
     })
 }
 
@@ -686,9 +686,9 @@ fn build_opencode_go_lines(db_path: &Path) -> Option<Vec<Value>> {
     lines.push(json!({
         "type": "progress",
         "label": "Session",
-        "used": session_pct,
+        "used": (100.0 - session_pct).max(0.0),
         "limit": 100.0,
-        "format": { "kind": "percent" },
+        "format": { "kind": "percent", "mode": "remaining" },
         "subtitle": format!("${:.2} / ${:.0}", session_cost, session_limit),
         "resetsAt": ms_to_iso(session_reset)
     }));
@@ -696,9 +696,9 @@ fn build_opencode_go_lines(db_path: &Path) -> Option<Vec<Value>> {
     lines.push(json!({
         "type": "progress",
         "label": "Weekly",
-        "used": weekly_pct,
+        "used": (100.0 - weekly_pct).max(0.0),
         "limit": 100.0,
-        "format": { "kind": "percent" },
+        "format": { "kind": "percent", "mode": "remaining" },
         "subtitle": format!("${:.2} / ${:.0}", weekly_cost, weekly_limit),
         "resetsAt": ms_to_iso(week_end)
     }));
@@ -706,9 +706,9 @@ fn build_opencode_go_lines(db_path: &Path) -> Option<Vec<Value>> {
     lines.push(json!({
         "type": "progress",
         "label": "Monthly",
-        "used": monthly_pct,
+        "used": (100.0 - monthly_pct).max(0.0),
         "limit": 100.0,
-        "format": { "kind": "percent" },
+        "format": { "kind": "percent", "mode": "remaining" },
         "subtitle": format!("${:.2} / ${:.0}", monthly_cost, monthly_limit),
         "resetsAt": ms_to_iso(month_end)
     }));
@@ -898,14 +898,9 @@ fn emit_sync_warning_if_needed(app: &AppHandle, accounts: &[Value]) {
         return;
     }
 
-    let suffix = if failed.len() >= 3 {
-        " Check provider credentials or network access."
-    } else {
-        ""
-    };
     emit_runtime_warning(
         app,
-        &format!("Sync completed with issues: {}.{}", failed.join(", "), suffix),
+        &format!("Sync issues: {}. Check provider credentials or network access.", failed.join(", ")),
     );
 }
 
@@ -952,19 +947,32 @@ fn build_intervention(
         .or_else(|| payload.get("message"))
         .or_else(|| payload.get("prompt"))
         .and_then(Value::as_str)
+        .filter(|s| !s.is_empty() && s.len() < 300)
         .map(str::to_string)
-        .unwrap_or_else(|| {
-            if command.is_empty() {
-                raw.chars().take(240).collect()
+        .or_else(|| {
+            if !tool_name.is_empty() && tool_name != "permission" {
+                Some(format!("Tool: {}", tool_name))
+            } else if !command.is_empty() {
+                Some(command.clone())
             } else {
-                command.clone()
+                None
             }
-        });
-    let source_label = if source == "codex" { "Codex" } else { "Agent" };
+        })
+        .unwrap_or_else(|| "Confirm this action".to_string());
+    let source_label = if source == "codex" { "Codex" } else if source == "claude" { "Claude" } else { "Agent" };
+    let prompt_text = payload
+        .get("prompt")
+        .or_else(|| payload.get("message"))
+        .or_else(|| payload.get("reason"))
+        .and_then(Value::as_str)
+        .filter(|s| !s.is_empty())
+        .map(|s| s.chars().take(180).collect::<String>());
     let title = if !file_path.is_empty() {
         format!("{source_label} wants to edit {file_path}")
     } else if !command.is_empty() {
-        format!("{source_label} wants to run a command")
+        format!("{source_label} wants to run: {}", command.chars().take(80).collect::<String>())
+    } else if let Some(ref p) = prompt_text {
+        p.clone()
     } else {
         format!("{source_label} needs approval")
     };
@@ -1082,7 +1090,7 @@ fn island_set_expanded_height(app: AppHandle, height: f64) -> Result<(), String>
     let next_height = height
         .round()
         .max(80.0)
-        .min((area_h as f64 * 0.8).max(80.0)) as u32;
+        .min((area_h as f64 * 0.92).max(80.0)) as u32;
     {
         let app_state = app.state::<AppState>();
         let mut state = app_state.window.lock().map_err(|err| err.to_string())?;

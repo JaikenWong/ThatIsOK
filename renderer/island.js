@@ -10,6 +10,7 @@ const primaryValue = document.getElementById('primaryValue');
 const pillProgress = document.getElementById('pillProgress');
 const sessionsList = document.getElementById('sessionsList');
 const accountsList = document.getElementById('accountsList');
+const actionBar = document.querySelector('.actions');
 const syncButton = document.getElementById('syncButton');
 const syncIntervalDown = document.getElementById('syncIntervalDown');
 const syncIntervalUp = document.getElementById('syncIntervalUp');
@@ -35,7 +36,7 @@ const PROVIDER_SETUP_TIPS = {
     codex: 'Requires Codex login. Run codex login, restart Codex, then Sync.',
     claude: 'Requires Claude Code login and hooks. Restart Claude Code after enabling.',
     cursor: 'Requires Cursor local login before usage can be synced.',
-    minimax: 'Requires MiniMax local login before plan usage can be synced.',
+    minimax: 'Requires MINIMAX_API_KEY or MINIMAX_CN_API_KEY in environment, then Sync.',
     gemini: 'Requires Gemini local login before usage can be synced.',
     deepseek: 'Requires DEEPSEEK_API_KEY in project .env or environment, then restart.',
     opencode: 'Install ThatIsOK plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.',
@@ -299,6 +300,30 @@ function getTone(data) {
 
     if (!data) {
         return 'tone-neutral';
+    }
+
+    const accounts = data.accounts || [];
+
+    for (const account of accounts) {
+        if (account.status === 'setup' || account.status === 'error' || account.status === 'stale') continue;
+
+        if (typeof account.usage?.remainingPercent === 'number') {
+            if (account.usage.remainingPercent <= 0) return 'tone-danger';
+            if (account.usage.remainingPercent <= 30) return 'tone-warn';
+        }
+
+        if (Array.isArray(account.lines)) {
+            for (const line of account.lines) {
+                if (!line || line.type !== 'progress') continue;
+                const used = Number(line.used || 0);
+                const limit = Number(line.limit || 0);
+                if (limit <= 0) continue;
+                const pct = (used / limit) * 100;
+                const remainingPct = line.format?.mode === 'remaining' ? pct : (100 - pct);
+                if (remainingPct <= 0) return 'tone-danger';
+                if (remainingPct <= 30) return 'tone-warn';
+            }
+        }
     }
 
     if (Number.isFinite(data.overview.totalBalanceUsd) && (data.overview.totalBalanceUsd <= 20 || data.overview.runwayDays <= 3)) {
@@ -574,7 +599,7 @@ function getPrioritizedVisibleAccounts(accounts) {
 
 function renderAccountCard(account) {
     const plan = account.plan ? `<div class="accountPlanRow"><span class="accountPlan">${escapeHtml(account.plan)}</span></div>` : '';
-    const lines = Array.isArray(account.lines) ? account.lines.slice(0, 2).map((line) => renderAccountLine(line)).join('') : '';
+    const lines = Array.isArray(account.lines) ? account.lines.slice(0, 3).map((line) => renderAccountLine(line)).join('') : '';
     const statusClass = account.status ? ` account-${escapeHtml(account.status)}` : '';
     const tip = getAccountTip(account);
     const tipBadge = tip ? renderTipBadge(tip) : '';
@@ -713,14 +738,15 @@ function renderProgressLine(line) {
 }
 
 function renderSessions(sessions) {
-    if (!sessions.length) {
+    const meaningful = sessions.filter(s => s.status);
+    if (!meaningful.length) {
         sessionsList.classList.add('hidden');
         sessionsList.innerHTML = '';
         return;
     }
 
     sessionsList.classList.remove('hidden');
-    sessionsList.innerHTML = sessions.slice(0, 2).map((session) => `
+    sessionsList.innerHTML = meaningful.slice(0, 2).map((session) => `
         <div class="sessionRow">
             <span class="sessionName">${formatSource(session.source)}</span>
             <span class="sessionValue">${session.status || '--'}</span>
@@ -895,6 +921,7 @@ function scheduleExpandedHeightSync() {
         const expandedStyle = window.getComputedStyle(expandedContent);
         const gap = Number.parseFloat(expandedStyle.gap) || 0;
         const headerHeight = pillContent.offsetHeight || 0;
+        const actionBarHeight = actionBar && !actionBar.classList.contains('compactHidden') ? (actionBar.offsetHeight || 0) : 0;
 
         // Measure all children of expandedContent
         let contentHeight = 0;
@@ -927,10 +954,10 @@ function scheduleExpandedHeightSync() {
             contentHeight += (visibleChildrenCount - 1) * gap;
         }
 
-        const desiredHeight = Math.ceil(topPadding + headerHeight + gap + contentHeight + bottomPadding);
+        const desiredHeight = Math.ceil(topPadding + headerHeight + gap + contentHeight + bottomPadding + actionBarHeight);
 
-        // Cap: never exceed 80% of available work area
-        const maxH = Math.round(window.screen.availHeight * 0.8);
+        // Cap: never exceed 92% of available work area
+        const maxH = Math.round(window.screen.availHeight * 0.92);
         const clampedHeight = Math.min(desiredHeight, maxH);
 
         if (Math.abs(clampedHeight - lastExpandedHeight) < 8) {
