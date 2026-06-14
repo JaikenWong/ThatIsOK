@@ -39,6 +39,25 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: "--target aarch64-apple-darwin"
+      - name: Generate latest.json (macOS)
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          DMG="ThatIsOK_${VERSION}_aarch64.dmg"
+          APP_TAR="ThatIsOK_aarch64.app.tar.gz"
+          cat > latest.json << JSONEOF
+          {
+            "version": "${VERSION}",
+            "notes": "Bug fixes and improvements.",
+            "pub_date": "$(date -u +"%Y-%m-%dT%H:%M:%SZ")",
+            "platforms": {
+              "darwin-aarch64": {
+                "url": "https://github.com/JaikenWong/ThatIsOK/releases/download/v${VERSION}/${DMG}"
+              }
+            }
+          }
+          JSONEOF
+          gh release upload "v${VERSION}" latest.json --clobber
 
   build-windows:
     needs: build-macos
@@ -71,3 +90,21 @@ jobs:
           releaseDraft: false
           prerelease: false
           args: ""
+      - name: Merge latest.json (Windows)
+        shell: bash
+        run: |
+          VERSION="${GITHUB_REF#refs/tags/v}"
+          EXE="ThatIsOK_${VERSION}_x64-setup.exe"
+          gh release download "v${VERSION}" -p latest.json --clobber 2>/dev/null || true
+          if [ -f latest.json ]; then
+            cat latest.json | python3 -c "
+          import json, sys
+          d = json.load(sys.stdin)
+          d.setdefault('platforms', {})['windows-x86_64'] = {
+            'url': 'https://github.com/JaikenWong/ThatIsOK/releases/download/v${VERSION}/${EXE}'
+          }
+          json.dump(d, sys.stdout, indent=2)
+          " > latest_merged.json
+            mv latest_merged.json latest.json
+          fi
+          gh release upload "v${VERSION}" latest.json --clobber
