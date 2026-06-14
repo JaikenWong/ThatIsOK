@@ -1165,7 +1165,7 @@ fn island_set_expanded_height(app: AppHandle, height: f64) -> Result<(), String>
     let next_height = height
         .round()
         .max(80.0)
-        .min((area_h as f64 * 0.92).max(80.0)) as u32;
+        .min((area_h as f64 * 0.85).max(80.0)) as u32;
     {
         let app_state = app.state::<AppState>();
         let mut state = app_state.window.lock().map_err(|err| err.to_string())?;

@@ -959,7 +959,7 @@ function scheduleExpandedHeightSync() {
         const desiredHeight = Math.ceil(topPadding + headerHeight + gap + contentHeight + bottomPadding + actionBarHeight);
 
         // Cap: never exceed 92% of available work area
-        const maxH = Math.round(window.screen.availHeight * 0.92);
+        const maxH = Math.round(window.screen.availHeight * 0.85);
         const clampedHeight = Math.min(desiredHeight, maxH);
 
         if (Math.abs(clampedHeight - lastExpandedHeight) < 8) {
