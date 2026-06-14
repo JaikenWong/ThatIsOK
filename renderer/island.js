@@ -1336,37 +1336,33 @@ Promise.all([
 function showUpdateBanner(status, message) {
     const el = document.getElementById('settingsMeta');
     if (!el) return;
+    el.classList.remove('hidden');
     switch (status) {
         case 'checking':
-            el.innerHTML = 'Checking for updates...';
-            el.classList.add('update-banner');
+            el.textContent = 'Checking for updates...';
             break;
         case 'available':
-            el.innerHTML = `v${escapeHtml(message)} available. Click ThatIsOK v1.0.0 in tray to update.`;
-            el.classList.add('update-banner');
+            el.textContent = `v${escapeHtml(message)} available. Click ThatISOK in tray to update.`;
             break;
         case 'downloading':
-            el.innerHTML = `Downloading v${escapeHtml(message)}...`;
-            el.classList.add('update-banner');
+            el.textContent = `Downloading v${escapeHtml(message)}...`;
             break;
         case 'installed':
             el.innerHTML = 'Update ready. <button id="restartButton" class="btn sync">Restart</button>';
-            el.classList.add('update-banner');
             document.getElementById('restartButton')?.addEventListener('click', () => {
                 ipcRenderer.send('app:restart');
             });
             break;
         case 'up-to-date':
-            el.innerHTML = 'ThatIsOK is up to date.';
-            el.classList.add('update-banner');
-            setTimeout(() => { el.innerHTML = ''; el.classList.remove('update-banner'); }, 4000);
+            el.textContent = 'ThatIsOK is up to date.';
+            setTimeout(() => { el.textContent = ''; el.classList.add('hidden'); }, 4000);
             break;
         case 'error':
-            el.innerHTML = `Update failed: ${escapeHtml(message)}`;
-            el.classList.add('update-banner');
+            el.textContent = `Update failed: ${escapeHtml(message)}`;
             break;
         default: break;
     }
+}
 }
 
 ipcRenderer.on('update-status', (_, payload) => {
