@@ -5,7 +5,8 @@
 ThatIsOK is a **floating island** that lives on your desktop. It intercepts permission requests from Claude Code and Codex, and tracks usage balances across all your AI coding tools in one glance.
 
 <p align="center">
-  <em>Screenshot coming soon — the island shows provider rings (collapsed) or a full panel with toggle switches, progress bars, and session logs (expanded).</em>
+  <img src="assets/images/small.png" alt="ThatIsOK collapsed — provider rings" width="320" />
+  <img src="assets/images/all.png" alt="ThatIsOK expanded — full panel with usage details" width="320" />
 </p>
 
 ## What it does
