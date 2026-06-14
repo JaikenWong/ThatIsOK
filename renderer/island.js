@@ -138,6 +138,7 @@ function createIpcRendererAdapter() {
         'island:get-data': 'island_get_data',
         'island:get-intervention': 'island_get_intervention',
         'island:sync-now': 'island_sync_now',
+        'intervention:respond': 'intervention_respond',
         'providers:get-visibility': 'providers_get_visibility',
         'settings:get': 'settings_get',
         'settings:set-sync-interval': 'settings_set_sync_interval'
@@ -844,7 +845,7 @@ function renderInterventionCommand(command) {
 
     const text = String(command);
     interventionCommand.classList.remove('hidden');
-    interventionCommand.textContent = compactText(text, 132);
+    interventionCommand.textContent = compactText(text, 260);
 }
 
 function renderDetailText(intervention) {
@@ -853,14 +854,14 @@ function renderDetailText(intervention) {
     }
 
     if (intervention.reason) {
-        return compactText(intervention.reason, 120);
+        return compactText(intervention.reason, 180);
     }
 
     if (intervention.command && intervention.detail === intervention.command) {
         return `${formatSource(intervention.source)} requested action`;
     }
 
-    return compactText(intervention.detail || '--', 64);
+    return compactText(intervention.detail || '--', 180);
 }
 
 function compactText(value, maxLength) {
@@ -1052,17 +1053,26 @@ syncIntervalUp.addEventListener('click', async () => {
     await nudgeSyncInterval(1);
 });
 
-approveButton.addEventListener('click', () => {
-    sendInterventionDecision('approve');
-});
+bindInterventionButton(approveButton, 'approve');
+bindInterventionButton(approveAlwaysButton, 'approve_always');
+bindInterventionButton(denyButton, 'deny');
 
-approveAlwaysButton.addEventListener('click', () => {
-    sendInterventionDecision('approve_always');
-});
-
-denyButton.addEventListener('click', () => {
-    sendInterventionDecision('deny');
-});
+function bindInterventionButton(button, decision) {
+    let pointerHandledAt = 0;
+    const handler = (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        if (event.type === 'click' && Date.now() - pointerHandledAt < 350) {
+            return;
+        }
+        if (event.type === 'pointerup') {
+            pointerHandledAt = Date.now();
+        }
+        sendInterventionDecision(decision);
+    };
+    button.addEventListener('pointerup', handler);
+    button.addEventListener('click', handler);
+}
 
 window.addEventListener('keydown', (event) => {
     if (!pendingIntervention) {
@@ -1088,7 +1098,7 @@ window.addEventListener('keydown', (event) => {
     }
 });
 
-function sendInterventionDecision(decision) {
+async function sendInterventionDecision(decision) {
     if (!pendingIntervention) {
         return;
     }
@@ -1102,7 +1112,21 @@ function sendInterventionDecision(decision) {
     approveButton.disabled = true;
     approveAlwaysButton.disabled = true;
     denyButton.disabled = true;
-    ipcRenderer.send('intervention:respond', decision);
+    try {
+        const ok = await ipcRenderer.invoke('intervention:respond', decision);
+        if (!ok) {
+            respondingInterventionId = null;
+            approveButton.disabled = false;
+            approveAlwaysButton.disabled = false;
+            denyButton.disabled = false;
+        }
+    } catch (err) {
+        console.error('Intervention decision failed', err);
+        respondingInterventionId = null;
+        approveButton.disabled = false;
+        approveAlwaysButton.disabled = false;
+        denyButton.disabled = false;
+    }
 }
 
 function renderShortcuts() {

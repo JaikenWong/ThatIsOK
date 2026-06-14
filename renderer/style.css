@@ -919,6 +919,8 @@ body, html {
 .interventionTitle {
     font-size: 12px;
     font-weight: 700;
+    line-height: 1.25;
+    word-break: break-word;
 }
 
 .interventionDetail {
@@ -940,8 +942,8 @@ body, html {
     white-space: pre-wrap;
     word-break: break-word;
     color: rgba(255, 255, 255, 0.94);
-    max-height: 56px;
-    overflow: hidden;
+    max-height: 112px;
+    overflow: auto;
 }
 
 .interventionMeta {
@@ -975,6 +977,13 @@ body, html {
     display: flex;
     justify-content: stretch;
     gap: 6px;
+    -webkit-app-region: no-drag;
+    pointer-events: auto;
+}
+
+.interventionActions * {
+    -webkit-app-region: no-drag;
+    pointer-events: auto;
 }
 
 .btn {

@@ -876,6 +876,95 @@ fn get_pending_intervention(state: &AppState) -> Option<Value> {
         .and_then(|pending| pending.as_ref().map(pending_intervention_json))
 }
 
+fn nested_tool_input(payload: &Value) -> Option<&serde_json::Map<String, Value>> {
+    payload
+        .get("tool_input")
+        .or_else(|| payload.get("toolInput"))
+        .or_else(|| payload.get("input"))
+        .or_else(|| payload.get("parameters"))
+        .or_else(|| payload.get("arguments"))
+        .and_then(Value::as_object)
+}
+
+fn string_field(payload: &Value, keys: &[&str]) -> String {
+    keys.iter()
+        .find_map(|key| payload.get(*key).and_then(Value::as_str))
+        .or_else(|| {
+            nested_tool_input(payload).and_then(|input| {
+                keys.iter()
+                    .find_map(|key| input.get(*key).and_then(Value::as_str))
+            })
+        })
+        .unwrap_or("")
+        .to_string()
+}
+
+fn char_preview(value: &str, limit: usize) -> String {
+    let mut preview = value.replace('\n', "\\n");
+    if preview.chars().count() > limit {
+        preview = preview.chars().take(limit).collect::<String>();
+        preview.push('…');
+    }
+    preview
+}
+
+fn tool_input_summary(tool_name: &str, input: Option<&serde_json::Map<String, Value>>, file_path: &str, command: &str) -> Option<String> {
+    let tool = tool_name.to_ascii_lowercase();
+    if tool == "bash" || !command.is_empty() {
+        return Some(format!("Command: {}", char_preview(command, 180)));
+    }
+
+    let Some(input) = input else {
+        return None;
+    };
+
+    if tool == "write" || tool == "notebookwrite" {
+        let content = input
+            .get("content")
+            .or_else(|| input.get("new_string"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let line_count = content.lines().count();
+        if !file_path.is_empty() {
+            return Some(format!("File: {file_path} · writing {line_count} lines"));
+        }
+        return Some(format!("Writing {line_count} lines"));
+    }
+
+    if tool == "edit" {
+        let old_text = input.get("old_string").and_then(Value::as_str).unwrap_or("");
+        let new_text = input.get("new_string").and_then(Value::as_str).unwrap_or("");
+        if !old_text.is_empty() || !new_text.is_empty() {
+            return Some(format!(
+                "Replace: {} → {}",
+                char_preview(old_text, 70),
+                char_preview(new_text, 70)
+            ));
+        }
+        if !file_path.is_empty() {
+            return Some(format!("File: {file_path}"));
+        }
+    }
+
+    if tool == "multiedit" {
+        let edits = input
+            .get("edits")
+            .and_then(Value::as_array)
+            .map(Vec::len)
+            .unwrap_or(0);
+        if !file_path.is_empty() {
+            return Some(format!("File: {file_path} · {edits} edits"));
+        }
+        return Some(format!("{edits} edits"));
+    }
+
+    if !file_path.is_empty() {
+        return Some(format!("File: {file_path}"));
+    }
+
+    None
+}
+
 fn emit_runtime_warning(app: &AppHandle, message: &str) {
     let _ = app.emit(
         "runtime-warning",
@@ -910,6 +999,7 @@ fn build_intervention(
     raw: &str,
     payload: Value,
 ) -> PendingIntervention {
+    let input = nested_tool_input(&payload);
     let tool_name = payload
         .get("tool_name")
         .or_else(|| payload.get("toolName"))
@@ -917,31 +1007,8 @@ fn build_intervention(
         .and_then(Value::as_str)
         .unwrap_or("permission")
         .to_string();
-    let command = payload
-        .get("command")
-        .or_else(|| payload.get("cmd"))
-        .and_then(Value::as_str)
-        .map(str::to_string)
-        .or_else(|| {
-            payload
-                .get("tool_input")
-                .and_then(Value::as_object)
-                .and_then(|input| {
-                    input
-                        .get("command")
-                        .or_else(|| input.get("cmd"))
-                        .and_then(Value::as_str)
-                        .map(str::to_string)
-                })
-        })
-        .unwrap_or_default();
-    let file_path = payload
-        .get("file_path")
-        .or_else(|| payload.get("filePath"))
-        .or_else(|| payload.get("path"))
-        .and_then(Value::as_str)
-        .unwrap_or("")
-        .to_string();
+    let command = string_field(&payload, &["command", "cmd"]);
+    let file_path = string_field(&payload, &["file_path", "filePath", "path", "notebook_path"]);
     let detail = payload
         .get("reason")
         .or_else(|| payload.get("message"))
@@ -949,6 +1016,7 @@ fn build_intervention(
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty() && s.len() < 300)
         .map(str::to_string)
+        .or_else(|| tool_input_summary(&tool_name, input, &file_path, &command))
         .or_else(|| {
             if !tool_name.is_empty() && tool_name != "permission" {
                 Some(format!("Tool: {}", tool_name))
@@ -967,10 +1035,17 @@ fn build_intervention(
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty())
         .map(|s| s.chars().take(180).collect::<String>());
-    let title = if !file_path.is_empty() {
+    let tool_key = tool_name.to_ascii_lowercase();
+    let title = if !file_path.is_empty() && (tool_key == "write" || tool_key == "notebookwrite") {
+        format!("{source_label} wants to write {file_path}")
+    } else if !file_path.is_empty() && (tool_key == "edit" || tool_key == "multiedit") {
         format!("{source_label} wants to edit {file_path}")
+    } else if !file_path.is_empty() {
+        format!("{source_label} wants to use {tool_name} on {file_path}")
     } else if !command.is_empty() {
         format!("{source_label} wants to run: {}", command.chars().take(80).collect::<String>())
+    } else if !tool_name.is_empty() && tool_name != "permission" {
+        format!("{source_label} wants to use {tool_name}")
     } else if let Some(ref p) = prompt_text {
         p.clone()
     } else {
@@ -1406,9 +1481,18 @@ pub fn run() {
                 use tauri_plugin_updater::UpdaterExt;
                 let h = app.handle().clone();
                 tauri::async_runtime::spawn(async move {
-                    if let Ok(updater) = h.updater() {
-                        if let Ok(Some(update)) = updater.check().await {
-                            let _ = h.emit("update-status", json!({"status": "available", "version": update.version.to_string()}));
+                    match h.updater() {
+                        Ok(updater) => match updater.check().await {
+                            Ok(Some(update)) => {
+                                let _ = h.emit("update-status", json!({"status": "available", "version": update.version.to_string()}));
+                            }
+                            Ok(None) => {}
+                            Err(e) => {
+                                let _ = h.emit("update-status", json!({"status": "error", "message": e.to_string()}));
+                            }
+                        },
+                        Err(e) => {
+                            let _ = h.emit("update-status", json!({"status": "error", "message": e.to_string()}));
                         }
                     }
                 });
@@ -1563,4 +1647,72 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn claude_write_intervention_shows_file_and_lines() {
+        let item = build_intervention(
+            "claude",
+            "PermissionRequest",
+            "{}",
+            json!({
+                "tool_name": "Write",
+                "tool_input": {
+                    "file_path": "/tmp/example.txt",
+                    "content": "one\ntwo\nthree"
+                }
+            }),
+        );
+
+        assert!(item.title.contains("write /tmp/example.txt"));
+        assert!(item.detail.contains("writing 3 lines"));
+        assert_eq!(item.file_path, "/tmp/example.txt");
+    }
+
+    #[test]
+    fn claude_edit_intervention_shows_replacement() {
+        let item = build_intervention(
+            "claude",
+            "PermissionRequest",
+            "{}",
+            json!({
+                "tool_name": "Edit",
+                "tool_input": {
+                    "file_path": "/tmp/example.txt",
+                    "old_string": "old value",
+                    "new_string": "new value"
+                }
+            }),
+        );
+
+        assert!(item.title.contains("edit /tmp/example.txt"));
+        assert!(item.detail.contains("old value"));
+        assert!(item.detail.contains("new value"));
+    }
+
+    #[test]
+    fn claude_multiedit_intervention_shows_edit_count() {
+        let item = build_intervention(
+            "claude",
+            "PermissionRequest",
+            "{}",
+            json!({
+                "tool_name": "MultiEdit",
+                "tool_input": {
+                    "file_path": "/tmp/example.txt",
+                    "edits": [
+                        { "old_string": "a", "new_string": "b" },
+                        { "old_string": "c", "new_string": "d" }
+                    ]
+                }
+            }),
+        );
+
+        assert!(item.title.contains("edit /tmp/example.txt"));
+        assert!(item.detail.contains("2 edits"));
+    }
 }
