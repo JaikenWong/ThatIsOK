@@ -1312,6 +1312,10 @@ function showUpdateBanner(status, message) {
     const el = document.getElementById('settingsMeta');
     if (!el) return;
     switch (status) {
+        case 'checking':
+            el.textContent = 'Checking for updates...';
+            el.classList.add('update-banner');
+            break;
         case 'downloading':
             el.textContent = `Downloading v${message}...`;
             el.classList.add('update-banner');

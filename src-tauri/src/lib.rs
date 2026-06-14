@@ -1456,6 +1456,7 @@ pub fn run() {
                                     "update" => {
                                         use tauri_plugin_updater::UpdaterExt;
                                         let h = app_handle_inner.clone();
+                                        let _ = h.emit("update-status", json!({"status": "checking"}));
                                         tauri::async_runtime::spawn(async move {
                                             match h.updater() {
                                                 Ok(updater) => match updater.check().await {
