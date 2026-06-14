@@ -32,9 +32,13 @@ jobs:
         shell: bash
         env:
           TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          TAURI_UPDATER_PUBKEY_SECRET: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
+          if [ -z "$TAURI_UPDATER_PUBKEY" ] && [ -n "$TAURI_UPDATER_PUBKEY_SECRET" ]; then
+            TAURI_UPDATER_PUBKEY="$TAURI_UPDATER_PUBKEY_SECRET"
+          fi
           if [ -z "$TAURI_UPDATER_PUBKEY" ]; then
-            echo "TAURI_UPDATER_PUBKEY repository variable is required"
+            echo "TAURI_UPDATER_PUBKEY repository variable or secret is required"
             exit 1
           fi
           node -e "const fs=require('fs'); const pubkey=process.env.TAURI_UPDATER_PUBKEY; fs.writeFileSync('src-tauri/tauri.release.conf.json', JSON.stringify({bundle:{createUpdaterArtifacts:true},plugins:{updater:{pubkey}}}, null, 2));"
@@ -75,9 +79,13 @@ jobs:
         shell: bash
         env:
           TAURI_UPDATER_PUBKEY: ${{ vars.TAURI_UPDATER_PUBKEY }}
+          TAURI_UPDATER_PUBKEY_SECRET: ${{ secrets.TAURI_UPDATER_PUBKEY }}
         run: |
+          if [ -z "$TAURI_UPDATER_PUBKEY" ] && [ -n "$TAURI_UPDATER_PUBKEY_SECRET" ]; then
+            TAURI_UPDATER_PUBKEY="$TAURI_UPDATER_PUBKEY_SECRET"
+          fi
           if [ -z "$TAURI_UPDATER_PUBKEY" ]; then
-            echo "TAURI_UPDATER_PUBKEY repository variable is required"
+            echo "TAURI_UPDATER_PUBKEY repository variable or secret is required"
             exit 1
           fi
           node -e "const fs=require('fs'); const pubkey=process.env.TAURI_UPDATER_PUBKEY; fs.writeFileSync('src-tauri/tauri.release.conf.json', JSON.stringify({bundle:{createUpdaterArtifacts:true},plugins:{updater:{pubkey}}}, null, 2));"
