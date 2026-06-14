@@ -41,6 +41,8 @@ jobs:
           args: "--target aarch64-apple-darwin"
       - name: Generate latest.json (macOS fallback)
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           if gh release view "v${VERSION}" --json assets --jq '.assets[].name' 2>/dev/null | grep -qx latest.json; then
@@ -48,7 +50,7 @@ jobs:
             exit 0
           fi
           DMG="ThatIsOK_${VERSION}_aarch64.dmg"
-          cat > latest.json << JSONEOF
+          cat > latest.json << 'JSONEOF'
           {
             "version": "${VERSION}",
             "notes": "Bug fixes and improvements.",
@@ -95,6 +97,8 @@ jobs:
           args: ""
       - name: Merge latest.json (Windows)
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           VERSION="${GITHUB_REF#refs/tags/v}"
           EXE="ThatIsOK_${VERSION}_x64-setup.exe"
