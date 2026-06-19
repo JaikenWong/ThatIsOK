@@ -16,14 +16,14 @@
                         <rect class="logoEye leftEye" x="8" y="11" width="4" height="10" rx="2" />
                         <rect class="logoEye rightEye" x="20" y="11" width="4" height="10" rx="2" />
                     </svg>
-                    <span id="primaryLabelText">ThatIsOK</span>
+                    <span id="primaryLabelText">Agent Gate</span>
                 </span>
                 <span id="primaryValue">Live</span>
                 <div id="pillProgress" class="pillProgressGroup hidden"></div>
             </div>
             <div id="expandedContent" class="hidden">
                 <div id="welcomeGuide" class="welcomeGuide hidden">
-                    <div class="welcomeHeader">Welcome to ThatIsOK</div>
+                    <div class="welcomeHeader">Welcome to Agent Gate</div>
                     <div class="welcomeText">Monitor your AI usage and approve tool calls from one place.</div>
                     <div class="guideSteps">
                         <div class="guideStep">
@@ -46,6 +46,7 @@
                 <div id="interventionPanel" class="intervention hidden">
                     <div class="interventionHeader">
                         <span id="interventionSource" class="sourceBadge">Claude</span>
+                        <span id="interventionRisk" class="riskBadge risk-caution">Caution</span>
                         <span id="interventionTool" class="toolBadge">permission</span>
                     </div>
                     <div id="interventionTitle" class="interventionTitle">Approval required</div>
@@ -58,17 +59,25 @@
                     <div class="interventionHint">
                         <span id="approveShortcut" class="hintKey">Ctrl Alt A</span> Approve
                         <span class="hintSep">|</span>
-                        <span id="alwaysShortcut" class="hintKey">Ctrl Alt L</span> Always
+                        <span id="alwaysShortcut" class="hintKey">Ctrl Alt L</span> Rule
                         <span class="hintSep">|</span>
                         <span id="denyShortcut" class="hintKey">Ctrl Alt D</span> Deny
                     </div>
                     <div class="interventionActions">
                         <button id="approveButton" class="btn approve" type="button">Approve</button>
-                        <button id="approveAlwaysButton" class="btn approveAlways" type="button">Always</button>
+                        <button id="approveAlwaysButton" class="btn approveAlways" type="button">Allow Rule</button>
                         <button id="denyButton" class="btn deny" type="button">Deny</button>
                         <button id="jumpToTerminalButton" class="btn jump hidden" type="button">Jump</button>
                     </div>
                 </div>
+                <div id="viewTabs" class="viewTabs">
+                    <button class="viewTab active" data-view="home" type="button">Home</button>
+                    <button class="viewTab" data-view="agents" type="button">Agents</button>
+                    <button class="viewTab" data-view="usage" type="button">Usage</button>
+                    <button class="viewTab" data-view="rules" type="button">Rules</button>
+                </div>
+                <div id="setupHealth" class="setupHealth"></div>
+                <div id="sessionsList" class="sessions hidden"></div>
                 <div class="topStack">
                     <div id="providersPanel" class="providersPanel">
                         <div id="providerToggles" class="providerToggles"></div>
@@ -88,8 +97,16 @@
                 </div>
                 <div id="settingsMeta" class="runtimeWarning hidden"></div>
                 <div id="runtimeWarning" class="runtimeWarning hidden"></div>
-                <div id="sessionsList" class="sessions hidden"></div>
                 <div id="accountsList" class="accounts"></div>
+                <div id="rulesPanel" class="rulesPanel hidden">
+                    <input id="rulesSearch" class="rulesSearch" type="search" placeholder="Search rules" autocomplete="off">
+                    <div id="rulesFilters" class="rulesFilters"></div>
+                    <div id="rulesList" class="rulesList"></div>
+                    <div id="rulesUndo" class="rulesUndo hidden">
+                        <span id="rulesUndoText"></span>
+                        <button id="rulesUndoButton" type="button">Undo</button>
+                    </div>
+                </div>
             </div>
             <div class="actions">
                 <button id="syncButton" class="btn sync">Sync</button>

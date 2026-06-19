@@ -2,17 +2,29 @@
 
 > AI 编码工具桌面审批与用量驾驶舱 — 悬浮、本地、无追踪。
 
-ThatIsOK 是一个常驻桌面的**浮动小岛**。它能拦截 Claude Code 和 Codex 的权限请求，同时一站式追踪所有 AI 编码工具的用量和余额。
+ThatIsOK 是一个常驻桌面的**浮动小岛**。应用内显示为 **Agent Gate**：它能拦截编码 Agent 的权限请求，追踪额度、余额，并在 Home 中展示今日本地 token 用量。
 
 <p align="center">
-  <em>截图即将补充 — 收起时显示 provider 进度圈，展开后展示完整面板：开关、进度条、会话日志。</em>
+  <img src="assets/images/small.png" alt="Agent Gate 收起状态" width="360" />
+</p>
+
+<p align="center">
+  <img src="assets/images/home.png" alt="Agent Gate Home：Provider 状态和 token 用量" width="270" />
+  <img src="assets/images/Usage.png" alt="Agent Gate Usage：Provider 开关和额度卡片" width="270" />
+</p>
+
+<p align="center">
+  <img src="assets/images/Agents.png" alt="Agent Gate Agents：实时会话详情" width="270" />
+  <img src="assets/images/rules.png" alt="Agent Gate Rules：规则筛选和删除" width="270" />
 </p>
 
 ## 功能
 
-- **权限审批** — 批准 / 永久批准 / 拒绝，不用切回终端
-- **用量追踪** — 实时进度条显示各 provider 的 session / 周 / 月配额
-- **余额同步** — 通过 provider API 拉取最新数据，快用完时颜色变红警示
+- **权限审批** — 批准、创建允许规则、回答 ask prompt、拒绝，都不用切回终端
+- **Home 驾驶舱** — Provider 健康状态、运行中的 Agent、精确/估算 token、今日本地活动集中展示
+- **用量追踪** — 实时进度条显示 5h / 周 / 月额度、credits、余额和重置时间
+- **Token 统计** — Claude、Gemini、Codex、OpenCode 在本地日志暴露 token 时显示精确今日用量
+- **规则管理** — 搜索、按来源筛选、长命令预览、删除规则、3 秒撤销
 - **始终置顶** — 可拖动的半透明悬浮岛，不会被其他窗口遮挡
 
 ## 支持的 Provider
@@ -27,16 +39,16 @@ ThatIsOK 是一个常驻桌面的**浮动小岛**。它能拦截 Claude Code 和
 
 ### 用量 & 余额
 
-| Provider | 追踪内容 | 数据来源 |
-|----------|---------|---------|
-| Codex | 5h / 7d 频率限制 | 本地认证 + session 文件 |
-| Claude Code | 会话费用 | 本地 JSONL transcript |
-| Cursor | 用量摘要 | 本地应用存储 |
-| Gemini | 用量数据 | 本地登录 + session 数据 |
-| DeepSeek | API 余额 | `DEEPSEEK_API_KEY` |
-| MiniMax | Token 套餐余额 | `MINIMAX_API_KEY` |
-| OpenCode Go | $12/$30/$60 配额 | 本地 SQLite（`opencode.db`）|
-| OpenCode Zen | 模型可用性 | OpenCode API key |
+| Provider | 追踪内容 | Token 数据 | 数据来源 |
+|----------|---------|------------|---------|
+| Codex | 5h / 7d 频率限制 | 从 session `token_count` 精确统计今日 token | 本地认证 + session 文件 |
+| Claude Code | 今日消息 / 会话 / 工具调用 | 从 JSONL transcript 精确统计今日 token | 本地 Claude 数据 |
+| Gemini | 每日请求 / 会话 | 从 Gemini 日志精确统计今日 token | 本地 Gemini 数据 |
+| OpenCode Go | $12 / $30 / $60 配额 | 从 SQLite session/message 精确统计今日 token | 本地 SQLite（`opencode.db`）|
+| OpenCode Zen | 模型可用性 | 未暴露 | OpenCode API key |
+| Kiro | Credits | 未暴露 | 本地 Kiro DB |
+| DeepSeek | API 余额 | 未暴露 | `DEEPSEEK_API_KEY` |
+| MiniMax | Token 套餐 prompt 余额 | 未暴露 | `MINIMAX_API_KEY` |
 
 ## 安装
 
@@ -68,10 +80,13 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 
 ### 悬浮岛
 
-| 模式 | 显示内容 |
+| 视图 | 显示内容 |
 |------|---------|
-| **收起** | Logo + provider 进度圈。每个圈代表一个 provider，填充比例 = 已用额度。悬停圆圈看具体数字，悬停 `?` 看配置提示。 |
-| **展开** | 点击小岛展开。显示开关面板（显示/隐藏 provider）、各 provider 详细进度条（含美元金额和重置时间）、会话日志、同步间隔设置。点击外部区域或开关收起。 |
+| **收起** | Logo + provider 紧凑状态。点击打开完整面板。 |
+| **Home** | Provider 健康状态、活动 Agent 数、行内 token 摘要、精确/估算 token 总量、token 条形图。 |
+| **Agents** | 活动 Agent 会话、时间线、payload 详情、工作目录、终端跳转目标。 |
+| **Usage** | Provider 显隐开关、同步间隔、版本/更新检查、额度卡片、余额和重置时间。 |
+| **Rules** | 可搜索允许规则列表，支持来源筛选、命令预览、删除图标和撤销。 |
 
 ### 全局快捷键
 
@@ -84,7 +99,7 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 
 ### 托盘菜单
 
-右键托盘图标（macOS 菜单栏 / Windows 系统托盘）可 **打开**、**立即同步**、**退出**。
+右键托盘图标（macOS 菜单栏 / Windows 系统托盘）可 **打开**、**立即同步**、**安装 Hooks**、**移除 Hooks**、查看更新状态、**退出**。
 
 ## Hook 工作原理
 
@@ -106,8 +121,9 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 ## 配置
 
 - **同步间隔** — 展开悬浮岛，点击设置行的 `+/-`（5 / 10 / 15 / 30 / 60 分钟）
-- **Provider 显隐** — 展开面板中的开关；关闭的 provider 不出现在圈和列表
-- **审批规则** — "永久批准" 会创建持久规则，保存在 `~/.config/ThatIsOK/approval-rules.json`
+- **Provider 显隐** — Usage 视图中的开关；关闭的 provider 不出现在 Home 和收起状态
+- **审批规则** — "Allow Rule / 允许规则" 会创建持久规则，保存在 `~/.config/ThatIsOK/approval-rules.json`
+- **Hooks** — 可在托盘菜单安装/移除受管 hooks，用于临时关闭 Agent 拦截
 - **隐藏程序坞** — macOS：应用以辅助模式运行，仅显示托盘图标。Windows：默认不显示任务栏图标。
 
 ## 隐私
@@ -122,7 +138,7 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 |------|------|
 | Provider 显示 "Stale" | 重新登录对应 provider，然后点 **Sync** |
 | 没有额度进度条 | Provider 可能需要本地登录才有数据 — 悬停 `?` 查看配置说明 |
-| 进度圈显示不全 | 减少可见 provider 数量，收起模式最多显示 5 个圈 |
+| Token 显示 `--` | 该 provider 没有暴露本地 token 记录，或今天还没同步到数据 |
 | Hook 不生效 | 先启动 ThatIsOK，再启动编码工具 |
 | 小岛不显示 | `Ctrl/Cmd+Shift+Space` 切换可见性；检查托盘图标 |
 

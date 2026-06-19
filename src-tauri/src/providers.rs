@@ -64,10 +64,30 @@ pub(crate) fn get_dashboard_data(state: &AppState) -> Value {
             entries
                 .iter()
                 .map(|info| {
+                    let events = info
+                        .events
+                        .iter()
+                        .map(|event| {
+                            json!({
+                                "event": event.event,
+                                "summary": event.summary,
+                                "detail": event.detail,
+                                "createdAt": event.created_at,
+                            })
+                        })
+                        .collect::<Vec<_>>();
                     json!({
                         "id": info.id,
                         "source": info.source,
                         "status": info.status,
+                        "activity": info.activity,
+                        "activityDetail": info.activity_detail,
+                        "toolName": info.tool_name,
+                        "command": info.command,
+                        "filePath": info.file_path,
+                        "events": events,
+                        "lastEvent": info.last_event,
+                        "updatedAt": info.updated_at,
                         "jumpTarget": info.jump_target,
                     })
                 })

@@ -18,6 +18,7 @@ const syncIntervalValue = document.getElementById('syncIntervalValue');
 const settingsMeta = document.getElementById('settingsMeta');
 const interventionPanel = document.getElementById('interventionPanel');
 const interventionSource = document.getElementById('interventionSource');
+const interventionRisk = document.getElementById('interventionRisk');
 const interventionTool = document.getElementById('interventionTool');
 const interventionTitle = document.getElementById('interventionTitle');
 const interventionExplanation = document.getElementById('interventionExplanation');
@@ -35,6 +36,15 @@ const alwaysShortcut = document.getElementById('alwaysShortcut');
 const denyShortcut = document.getElementById('denyShortcut');
 const jumpToTerminalButton = document.getElementById('jumpToTerminalButton');
 const interventionAskOptions = document.getElementById('interventionAskOptions');
+const viewTabs = document.getElementById('viewTabs');
+const setupHealth = document.getElementById('setupHealth');
+const rulesPanel = document.getElementById('rulesPanel');
+const rulesSearch = document.getElementById('rulesSearch');
+const rulesFilters = document.getElementById('rulesFilters');
+const rulesList = document.getElementById('rulesList');
+const rulesUndo = document.getElementById('rulesUndo');
+const rulesUndoText = document.getElementById('rulesUndoText');
+const rulesUndoButton = document.getElementById('rulesUndoButton');
 
 const PROVIDER_SETUP_TIPS = {
     codex: 'Requires Codex login. Run codex login, restart Codex, then Sync.',
@@ -43,7 +53,7 @@ const PROVIDER_SETUP_TIPS = {
     minimax: 'Requires MINIMAX_API_KEY or MINIMAX_CN_API_KEY in environment, then Sync.',
     gemini: 'Requires Gemini local login before usage can be synced.',
     deepseek: 'Requires DEEPSEEK_API_KEY in project .env or environment, then restart.',
-    opencode: 'Install ThatIsOK plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.',
+    opencode: 'Install Agent Gate plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.',
     kiro: 'Requires Kiro (Amazon Q) installed and signed in. Open Kiro dashboard once to populate usage data.'
 };
 
@@ -65,6 +75,13 @@ let windowState = { mode: 'pill' };
 let runtimeWarningTimer = null;
 let settingsState = { syncIntervalMinutes: 10 };
 let updateReadyToRestart = false;
+let activeView = 'home';
+let approvalRules = [];
+let selectedAgentId = null;
+let rulesSearchQuery = '';
+let rulesSourceFilter = 'all';
+let expandedRuleIndex = null;
+let pendingRuleUndo = null;
 const DRAG_THRESHOLD = 8;
 const SYNC_INTERVAL_STEPS = [5, 10, 15, 30, 60];
 const knownProviderOrder = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'kiro', 'minimax', 'opencode'];
@@ -113,7 +130,7 @@ function refreshPillContent(data) {
         primaryValue.innerText = renderAccountHeadline(primaryAccount);
         hidePillProgress();
     } else {
-        primaryLabelText.innerText = 'Status';
+        primaryLabelText.innerText = 'Agent Gate';
         primaryValue.innerText = 'Live';
         hidePillProgress();
     }
@@ -147,6 +164,9 @@ function createIpcRendererAdapter() {
         'providers:get-visibility': 'providers_get_visibility',
         'settings:get': 'settings_get',
         'settings:set-sync-interval': 'settings_set_sync_interval',
+        'approval-rules:list': 'approval_rules_list',
+        'approval-rules:delete': 'approval_rules_delete',
+        'approval-rules:restore': 'approval_rules_restore',
         'island:jump-to-terminal': 'jump_to_terminal'
     };
 
@@ -205,9 +225,12 @@ island.addEventListener('click', (event) => {
         return;
     }
 
-    if (island.classList.contains('pill')) {
+    const isPill = island.classList.contains('pill');
+    const clickedHeader = Boolean(event.target.closest('#pillContent'));
+
+    if (isPill) {
         expandIsland();
-    } else {
+    } else if (clickedHeader) {
         collapseIsland();
     }
 });
@@ -352,6 +375,47 @@ guideClose.addEventListener('click', () => {
     scheduleExpandedHeightSync();
 });
 
+viewTabs.querySelectorAll('.viewTab').forEach(tab => {
+    tab.addEventListener('click', (event) => {
+        event.stopPropagation();
+        setActiveView(tab.dataset.view || 'home');
+    });
+});
+
+rulesSearch.addEventListener('input', (event) => {
+    rulesSearchQuery = event.target.value || '';
+    renderRulesList();
+    scheduleExpandedHeightSync();
+});
+
+rulesFilters.addEventListener('click', (event) => {
+    const button = event.target.closest('.rulesFilter');
+    if (!button) return;
+    rulesSourceFilter = button.dataset.source || 'all';
+    expandedRuleIndex = null;
+    renderRulesList();
+    scheduleExpandedHeightSync();
+});
+
+rulesUndoButton.addEventListener('click', async (event) => {
+    event.stopPropagation();
+    if (!pendingRuleUndo) return;
+
+    const undo = pendingRuleUndo;
+    clearPendingRuleUndo();
+    try {
+        approvalRules = await ipcRenderer.invoke('approval-rules:restore', {
+            index: undo.index,
+            rule: undo.rule
+        });
+        renderRulesList();
+        scheduleExpandedHeightSync();
+    } catch (err) {
+        console.error('Restore approval rule failed', err);
+        renderRuntimeWarning('Could not restore approval rule.');
+    }
+});
+
 function renderSummary(data) {
     currentData = data;
     const accounts = data.accounts || [];
@@ -375,12 +439,14 @@ function renderSummary(data) {
         primaryValue.innerText = renderAccountHeadline(primaryAccount);
         hidePillProgress();
     } else {
-        primaryLabelText.innerText = 'Status';
+        primaryLabelText.innerText = 'Agent Gate';
         primaryValue.innerText = 'Live';
         hidePillProgress();
     }
     renderSessions(data.sessions || []);
     renderAccounts(data.accounts || [], false);
+    renderSetupHealth(data);
+    renderActiveView();
     renderSyncedAt(data.syncedAt);
     updateCompactVisibility();
 
@@ -761,25 +827,73 @@ function renderProgressLine(line) {
 }
 
 function renderSessions(sessions) {
-    const meaningful = sessions.filter(s => s.jumpTarget);
+    const meaningful = sessions
+        .filter(s => s && s.source)
+        .filter(s => String(s.status || '').toLowerCase() !== 'done')
+        .slice(0, 5);
     if (!meaningful.length) {
-        sessionsList.classList.add('hidden');
-        sessionsList.innerHTML = '';
+        sessionsList.classList.remove('hidden');
+        sessionsList.innerHTML = `
+            <div class="agentsShell">
+                <div class="emptyState">No active agents</div>
+            </div>
+        `;
         return;
     }
 
+    if (!selectedAgentId || !meaningful.some(s => s.id === selectedAgentId)) {
+        selectedAgentId = meaningful[0].id;
+    }
+    const selected = meaningful.find(s => s.id === selectedAgentId) || meaningful[0];
     sessionsList.classList.remove('hidden');
     sessionsList.innerHTML = `
-        <div class="sessionsLabel">Activity</div>
-        ${meaningful.slice(0, 2).map((session) => `
-        <div class="sessionRow">
-            <span class="sessionName">${formatSource(session.source)}</span>
-            <span class="sessionValue">Working</span>
-            <button class="sessionJump" data-target='${escapeHtml(JSON.stringify(session.jumpTarget))}' type="button">Jump</button>
+        <div class="agentsShell">
+            <div class="agentList">
+                <div class="sessionsLabel">Running Agents</div>
+                ${meaningful.map((session) => `
+                <button class="agentListItem${session.id === selectedAgentId ? ' active' : ''}" data-agent-id="${escapeHtml(session.id)}" type="button">
+                    <span class="agentDot"></span>
+                    <span class="agentListMain">
+                        <span class="sessionName">${formatSource(session.source)}</span>
+                        <span class="sessionActivity">${escapeHtml(session.activity || session.summary || session.status || 'Working')}</span>
+                    </span>
+                </button>
+                `).join('')}
+            </div>
+            <div class="agentDetail">
+                <div class="agentDetailTop">
+                    <div>
+                        <div class="agentTitle">${formatSource(selected.source)}</div>
+                        <div class="sessionTime">${escapeHtml(formatSessionMeta(selected))}</div>
+                    </div>
+                    <span class="sessionStatus">${escapeHtml(selected.status || 'Active')}</span>
+                </div>
+                <div class="agentSummary">${escapeHtml(selected.activity || selected.summary || 'Working')}</div>
+                <pre class="agentActivityFull">${escapeHtml(selected.activityDetail || selected.activity || selected.summary || 'No detail yet')}</pre>
+                <div class="agentDetailGrid">
+                    ${renderAgentField('Tool', selected.toolName || '--')}
+                    ${renderAgentField('Event', selected.lastEvent || '--')}
+                    ${renderAgentField('Session', compactText(selected.id || '--', 34))}
+                    ${renderAgentField('File', selected.filePath || '--', true)}
+                    ${renderAgentField('Command', selected.command || '--', true)}
+                    ${renderAgentField('Terminal', selected.jumpTarget?.terminalApp || '--')}
+                    ${renderAgentField('TTY', selected.jumpTarget?.terminalTTY || '--')}
+                    ${renderAgentField('Working dir', selected.jumpTarget?.workingDirectory || '--', true)}
+                </div>
+                ${renderAgentTimeline(selected.events || [])}
+                ${selected.jumpTarget ? `<button class="sessionJump agentJump" data-target='${escapeHtml(JSON.stringify(selected.jumpTarget))}' type="button">Jump to Terminal</button>` : ''}
+            </div>
         </div>
-        `).join('')}
     `;
 
+    sessionsList.querySelectorAll('.agentListItem').forEach(btn => {
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            selectedAgentId = btn.dataset.agentId;
+            renderSessions(currentData?.sessions || []);
+            scheduleExpandedHeightSync();
+        });
+    });
     sessionsList.querySelectorAll('.sessionJump').forEach(btn => {
         btn.addEventListener('click', async (e) => {
             e.stopPropagation();
@@ -791,6 +905,457 @@ function renderSessions(sessions) {
             }
         });
     });
+}
+
+function renderAgentTimeline(events) {
+    if (!events.length) {
+        return '<div class="emptyState compactEmpty">No timeline yet</div>';
+    }
+    return `
+        <div class="agentTimeline">
+            <div class="sessionsLabel">Timeline</div>
+            ${events.slice(0, 6).map(event => `
+                <div class="timelineItem">
+                    <span class="timelineDot"></span>
+                    <div class="timelineBody">
+                        <div class="timelineTop">
+                            <span>${escapeHtml(String(event.event || '--').replace(/_/g, ' '))}</span>
+                            <em>${escapeHtml(formatTimelineTime(event.createdAt))}</em>
+                        </div>
+                        <div class="timelineSummary">${escapeHtml(event.summary || event.detail || '--')}</div>
+                    </div>
+                </div>
+            `).join('')}
+        </div>
+    `;
+}
+
+function formatTimelineTime(value) {
+    const time = Number(value || 0);
+    if (time <= 0) return '';
+    const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+    if (seconds < 60) return `${seconds}s`;
+    return `${Math.floor(seconds / 60)}m`;
+}
+
+function renderAgentField(label, value, wide = false) {
+    return `
+        <div class="agentField${wide ? ' wide' : ''}">
+            <span>${escapeHtml(label)}</span>
+            <strong>${escapeHtml(value || '--')}</strong>
+        </div>
+    `;
+}
+
+function formatSessionMeta(session) {
+    const parts = [];
+    if (session.lastEvent) {
+        parts.push(String(session.lastEvent).replace(/_/g, ' '));
+    }
+    const time = Number(session.updatedAt || 0);
+    if (time > 0) {
+        const seconds = Math.max(0, Math.floor((Date.now() - time) / 1000));
+        if (seconds < 60) {
+            parts.push(`${seconds}s ago`);
+        } else {
+            parts.push(`${Math.floor(seconds / 60)}m ago`);
+        }
+    }
+    return parts.join(' · ');
+}
+
+function renderSetupHealth(data) {
+    const accounts = data.accounts || [];
+    const visibleAccounts = getPrioritizedVisibleAccounts(accounts);
+    const activeProviders = Object.entries(providerVisibility)
+        .filter(([, info]) => info.visible)
+        .map(([provider]) => provider);
+    const connected = visibleAccounts.filter(a => !['setup', 'error', 'stale'].includes(a.status)).length;
+    const needsSetup = visibleAccounts.filter(a => ['setup', 'error', 'stale'].includes(a.status)).length;
+    const running = (data.sessions || [])
+        .filter(s => s && s.source)
+        .filter(s => String(s.status || '').toLowerCase() !== 'done')
+        .length;
+
+    const items = activeProviders.slice(0, 6).map(provider => {
+        const account = visibleAccounts.find(a => a.provider === provider);
+        const label = providerVisibility[provider]?.label || account?.label || provider;
+        const status = account?.status || 'setup';
+        const tone = status === 'error' || status === 'stale' ? 'bad' : status === 'setup' ? 'setup' : 'ok';
+        const text = tone === 'ok' ? 'Live' : status === 'stale' ? 'Stale' : status === 'error' ? 'Fix' : 'Setup';
+        return `
+            <div class="healthItem health-${tone}">
+                <div class="healthLeft">
+                    ${renderProviderBadge(provider, label)}
+                    <span class="healthName">${escapeHtml(label)}</span>
+                    <span class="healthState">${text}</span>
+                </div>
+                ${renderHealthUsageInline(account)}
+            </div>
+        `;
+    }).join('');
+
+    setupHealth.innerHTML = `
+        <div class="healthSummary">
+            <div><strong>${connected}</strong><span>connected</span></div>
+            <div><strong>${needsSetup}</strong><span>needs setup</span></div>
+            <div><strong>${running}</strong><span>active</span></div>
+        </div>
+        <div class="homeDashboard">
+            <div class="healthGrid">${items || '<div class="emptyState">No visible providers</div>'}</div>
+            <div class="homeMetrics">
+                ${renderTodayTokenStats(visibleAccounts)}
+                ${renderHomeUsageFloor(visibleAccounts)}
+            </div>
+        </div>
+    `;
+}
+
+function renderHealthUsageInline(account) {
+    if (!account) {
+        return '<div class="healthQuota muted">not synced</div>';
+    }
+    const tokenStats = readAccountTokenStats(account);
+    if (tokenStats.total > 0) {
+        return `
+            <div class="healthQuota">
+                <span>Today</span>
+                <strong>${escapeHtml(formatCompactNumber(tokenStats.total))}</strong>
+            </div>
+        `;
+    }
+
+    const messageCount = readFirstNumber([account?.meta?.todayMessages, account?.usage?.todayMessages]);
+    const sessionCount = readFirstNumber([account?.meta?.todaySessions, account?.usage?.todaySessions]);
+    if (messageCount > 0 || sessionCount > 0) {
+        return `
+            <div class="healthQuota">
+                <span>${escapeHtml(formatCompactNumber(messageCount))} msg</span>
+                <strong>${escapeHtml(formatCompactNumber(sessionCount))} sess</strong>
+            </div>
+        `;
+    }
+
+    const firstLine = Array.isArray(account.lines) ? account.lines[0] : null;
+    if (firstLine?.subtitle) {
+        return `<div class="healthQuota muted">${escapeHtml(compactText(firstLine.subtitle, 24))}</div>`;
+    }
+
+    return '<div class="healthQuota muted">ready</div>';
+}
+
+function renderTodayTokenStats(accounts) {
+    const stats = accounts
+        .map(readAccountTokenStats)
+        .filter(item => item.total > 0);
+    const total = stats.reduce((sum, item) => sum + item.total, 0);
+    const input = stats.reduce((sum, item) => sum + item.input, 0);
+    const output = stats.reduce((sum, item) => sum + item.output, 0);
+    const exactTotal = stats.reduce((sum, item) => sum + item.exactTotal, 0);
+    const estimatedTotal = stats.reduce((sum, item) => sum + item.estimatedTotal, 0);
+    const sources = stats.map(item => item.label).join(' · ');
+
+    return `
+        <div class="todayTokens">
+            <div class="todayTokensMain">
+                <span>Today Tokens</span>
+                <strong>${escapeHtml(stats.length ? formatCompactNumber(total) : '--')}</strong>
+            </div>
+            <div class="todayTokensSplit">
+                <span>In ${escapeHtml(stats.length ? formatCompactNumber(input) : '--')}</span>
+                <span>Out ${escapeHtml(stats.length ? formatCompactNumber(output) : '--')}</span>
+                <span>${escapeHtml(stats.length ? `Exact ${formatCompactNumber(exactTotal)} · Est ${formatCompactNumber(estimatedTotal)}` : 'No token data')}</span>
+                <span>${escapeHtml(stats.length ? sources : 'Sync local agents')}</span>
+            </div>
+        </div>
+    `;
+}
+
+function readAccountTokenStats(account) {
+    const tokenUsage = account?.tokenUsage || {};
+    const exactInput = readFirstNumber([
+        tokenUsage.exactInput,
+        account?.meta?.tokensInput,
+        account?.usage?.tokens?.input,
+        account?.usage?.tokensInput,
+        account?.usage?.inputTokens,
+    ]);
+    const exactOutput = readFirstNumber([
+        tokenUsage.exactOutput,
+        account?.meta?.tokensOutput,
+        account?.usage?.tokens?.output,
+        account?.usage?.tokensOutput,
+        account?.usage?.outputTokens,
+    ]);
+    const exactReasoning = readFirstNumber([tokenUsage.exactReasoning]);
+    const exactTotal = readFirstNumber([tokenUsage.exactTotal]) || exactInput + exactOutput + exactReasoning;
+    const estimatedInput = readFirstNumber([tokenUsage.estimatedInput]);
+    const estimatedOutput = readFirstNumber([tokenUsage.estimatedOutput]);
+    const estimatedTotal = readFirstNumber([tokenUsage.estimatedTotal]) || estimatedInput + estimatedOutput;
+    return {
+        input: exactInput + estimatedInput,
+        output: exactOutput + exactReasoning + estimatedOutput,
+        exactInput,
+        exactOutput: exactOutput + exactReasoning,
+        exactTotal,
+        estimatedInput,
+        estimatedOutput,
+        estimatedTotal,
+        total: exactTotal + estimatedTotal,
+        label: account?.label || formatSource(account?.provider),
+    };
+}
+
+function readFirstNumber(values) {
+    for (const value of values) {
+        const numeric = Number(value);
+        if (Number.isFinite(numeric) && numeric > 0) {
+            return numeric;
+        }
+    }
+    return 0;
+}
+
+function renderHomeUsageFloor(accounts) {
+    const tokenStats = accounts
+        .map(readAccountTokenStats)
+        .filter(item => item.total > 0)
+        .sort((a, b) => b.total - a.total);
+    const activity = accounts.reduce((acc, account) => {
+        acc.messages += readFirstNumber([
+            account?.meta?.todayMessages,
+            account?.usage?.todayMessages,
+        ]);
+        acc.sessions += readFirstNumber([
+            account?.meta?.todaySessions,
+            account?.usage?.todaySessions,
+        ]);
+        acc.tools += readFirstNumber([
+            account?.meta?.todayTools,
+            account?.usage?.todayTools,
+        ]);
+        return acc;
+    }, { messages: 0, sessions: 0, tools: 0 });
+    const maxTokens = Math.max(...tokenStats.map(item => item.total), 1);
+    const rows = tokenStats.length
+        ? tokenStats.slice(0, 4).map(item => {
+            const pct = Math.max(6, Math.round(item.total / maxTokens * 100));
+            return `
+                <div class="homeTokenRow">
+                    <span>${escapeHtml(item.label)}</span>
+                    <div><i style="width:${pct}%"></i></div>
+                    <strong>${escapeHtml(formatCompactNumber(item.total))}</strong>
+                </div>
+            `;
+        }).join('')
+        : '<div class="homeTokenEmpty">Token data appears after local providers sync.</div>';
+    const hasActivity = activity.messages > 0 || activity.sessions > 0 || activity.tools > 0;
+
+    return `
+        <div class="homeUsageFloor">
+            <div class="homeActivityMini">
+                <div><strong>${escapeHtml(hasActivity ? formatCompactNumber(activity.messages) : '--')}</strong><span>messages</span></div>
+                <div><strong>${escapeHtml(hasActivity ? formatCompactNumber(activity.sessions) : '--')}</strong><span>sessions</span></div>
+                <div><strong>${escapeHtml(hasActivity ? formatCompactNumber(activity.tools) : '--')}</strong><span>tools</span></div>
+            </div>
+            <div class="homeTokenBars">${rows}</div>
+        </div>
+    `;
+}
+
+function renderActiveView() {
+    const compact = Boolean(pendingIntervention);
+    island.classList.toggle('agentsView', !compact && activeView === 'agents');
+    island.classList.toggle('panelView', !compact && ['home', 'agents', 'usage', 'rules'].includes(activeView));
+    viewTabs.classList.toggle('hidden', compact);
+    setupHealth.classList.toggle('hidden', compact || activeView !== 'home');
+    sessionsList.classList.toggle('viewHidden', compact || activeView !== 'agents');
+    document.querySelector('.topStack')?.classList.toggle('hidden', compact || activeView !== 'usage');
+    accountsList.classList.toggle('hidden', compact || activeView !== 'usage');
+    rulesPanel.classList.toggle('hidden', compact || activeView !== 'rules');
+    actionBar.classList.toggle('viewHidden', compact || activeView !== 'usage');
+    renderRulesList();
+    scheduleExpandedHeightSync();
+}
+
+function setActiveView(view) {
+    if (view === 'activity') {
+        view = 'home';
+    }
+    activeView = view;
+    viewTabs.querySelectorAll('.viewTab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.view === view);
+    });
+    if (view === 'rules') {
+        loadApprovalRules();
+    }
+    renderActiveView();
+}
+
+function renderRulesList() {
+    if (activeView !== 'rules') {
+        return;
+    }
+    renderRulesFilters();
+    if (!approvalRules.length) {
+        rulesList.innerHTML = '<div class="emptyState">No always-allow rules yet</div>';
+        return;
+    }
+    const query = rulesSearchQuery.trim().toLowerCase();
+    const indexedRules = approvalRules
+        .map((rule, index) => ({ rule, index }))
+        .filter(({ rule }) => rulesSourceFilter === 'all' || normalizeRuleSource(rule.source) === rulesSourceFilter)
+        .filter(({ rule }) => !query || ruleSearchText(rule).includes(query));
+
+    if (!indexedRules.length) {
+        rulesList.innerHTML = '<div class="emptyState">No matching rules</div>';
+        return;
+    }
+
+    rulesList.innerHTML = indexedRules.map(({ rule, index }) => {
+        const subject = rule.prefixRule || rule.command || rule.filePath || rule.toolName || 'permission';
+        const scope = renderRuleScope(rule);
+        const source = formatSource(rule.source);
+        const fullSubject = String(subject || 'permission');
+        const expanded = expandedRuleIndex === index;
+        return `
+            <div class="ruleRow${expanded ? ' expanded' : ''}" data-index="${index}" title="${escapeHtml(fullSubject)}">
+                <div class="ruleMain">
+                    <span class="ruleSource">${escapeHtml(source)}</span>
+                    <span class="ruleText">${escapeHtml(compactText(subject, expanded ? 260 : 78))}</span>
+                    <span class="ruleMeta">${escapeHtml(scope)} · ${escapeHtml(rule.toolName || 'permission')} · ${formatRuleDate(rule.createdAt)}</span>
+                </div>
+                <button class="ruleDelete" data-index="${index}" type="button" aria-label="Remove rule" title="Remove">
+                    <svg viewBox="0 0 24 24" aria-hidden="true">
+                        <path d="M9 3h6l1 2h4v2H4V5h4l1-2Zm1 7h2v8h-2v-8Zm4 0h2v8h-2v-8ZM6 8h12l-1 13H7L6 8Z"></path>
+                    </svg>
+                </button>
+            </div>
+        `;
+    }).join('');
+    rulesList.querySelectorAll('.ruleRow').forEach(row => {
+        row.addEventListener('click', (event) => {
+            if (event.target.closest('.ruleDelete')) return;
+            const index = Number(row.dataset.index);
+            expandedRuleIndex = expandedRuleIndex === index ? null : index;
+            renderRulesList();
+            scheduleExpandedHeightSync();
+        });
+    });
+    rulesList.querySelectorAll('.ruleDelete').forEach(button => {
+        button.addEventListener('click', async (event) => {
+            event.stopPropagation();
+            const index = Number(button.dataset.index);
+            const deletedRule = approvalRules[index];
+            try {
+                approvalRules = await ipcRenderer.invoke('approval-rules:delete', { index });
+                if (expandedRuleIndex === index) {
+                    expandedRuleIndex = null;
+                } else if (expandedRuleIndex > index) {
+                    expandedRuleIndex -= 1;
+                }
+                showRuleUndo(deletedRule, index);
+                renderRulesList();
+                scheduleExpandedHeightSync();
+            } catch (err) {
+                console.error('Delete approval rule failed', err);
+                renderRuntimeWarning('Could not remove approval rule.');
+            }
+        });
+    });
+}
+
+function renderRulesFilters() {
+    const sources = Array.from(new Set(approvalRules.map(rule => normalizeRuleSource(rule.source)).filter(Boolean)));
+    sources.sort((a, b) => {
+        const ai = knownProviderOrder.indexOf(a);
+        const bi = knownProviderOrder.indexOf(b);
+        if (ai !== -1 && bi !== -1) return ai - bi;
+        if (ai !== -1) return -1;
+        if (bi !== -1) return 1;
+        return a.localeCompare(b);
+    });
+
+    if (rulesSourceFilter !== 'all' && !sources.includes(rulesSourceFilter)) {
+        rulesSourceFilter = 'all';
+    }
+
+    const filters = ['all', ...sources];
+    rulesFilters.innerHTML = filters.map(source => {
+        const label = source === 'all' ? 'All' : formatSource(source);
+        const active = source === rulesSourceFilter ? ' active' : '';
+        return `<button class="rulesFilter${active}" data-source="${escapeHtml(source)}" type="button">${escapeHtml(label)}</button>`;
+    }).join('');
+}
+
+function normalizeRuleSource(source) {
+    return String(source || 'agent').toLowerCase();
+}
+
+function showRuleUndo(rule, index) {
+    if (!rule) return;
+    clearPendingRuleUndo();
+    pendingRuleUndo = {
+        rule,
+        index,
+        timer: setTimeout(clearPendingRuleUndo, 3000)
+    };
+    rulesUndoText.innerText = `${formatSource(rule.source)} rule removed`;
+    rulesUndo.classList.remove('hidden');
+}
+
+function clearPendingRuleUndo() {
+    if (pendingRuleUndo?.timer) {
+        clearTimeout(pendingRuleUndo.timer);
+    }
+    pendingRuleUndo = null;
+    rulesUndo.classList.add('hidden');
+}
+
+function ruleSearchText(rule) {
+    return [
+        formatSource(rule.source),
+        rule.source,
+        rule.toolName,
+        rule.command,
+        rule.filePath,
+        rule.prefixRule,
+        renderRuleScope(rule),
+    ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function renderRuleScope(rule) {
+    if (rule.prefixRule) {
+        return 'prefix / sandbox rule';
+    }
+    if (rule.command) {
+        return 'exact command';
+    }
+    if (rule.filePath) {
+        return 'file path';
+    }
+    return 'tool scope';
+}
+
+async function loadApprovalRules() {
+    try {
+        approvalRules = await ipcRenderer.invoke('approval-rules:list');
+        renderRulesList();
+        scheduleExpandedHeightSync();
+    } catch (err) {
+        console.error('Load approval rules failed', err);
+        approvalRules = [];
+    }
+}
+
+function formatRuleDate(value) {
+    const date = new Date(Number(value || 0));
+    if (Number.isNaN(date.getTime())) {
+        return 'unknown';
+    }
+    const mm = String(date.getMonth() + 1).padStart(2, '0');
+    const dd = String(date.getDate()).padStart(2, '0');
+    return `${mm}/${dd}`;
 }
 
 function renderIntervention(intervention) {
@@ -816,6 +1381,7 @@ function renderIntervention(intervention) {
     interventionPanel.classList.remove('hidden');
     interventionSource.innerText = formatSource(intervention.source);
     interventionTool.innerText = formatTool(intervention.toolName);
+    renderInterventionRisk(intervention);
     interventionTitle.innerText = intervention.title || 'Approval required';
     interventionExplanation.innerText = intervention.explanation || '';
     interventionExplanation.classList.toggle('hidden', !intervention.explanation || intervention.explanation === intervention.detail);
@@ -842,6 +1408,7 @@ function renderIntervention(intervention) {
     } else {
         interventionAskOptions.classList.add('hidden');
         approveButton.innerText = 'Approve';
+        approveAlwaysButton.innerText = 'Allow Rule';
         approveAlwaysButton.classList.remove('hidden');
     }
 
@@ -947,6 +1514,32 @@ function renderDetailText(intervention) {
     return compactText(intervention.detail || '--', 200);
 }
 
+function renderInterventionRisk(intervention) {
+    const risk = inferInterventionRisk(intervention);
+    interventionRisk.innerText = risk.label;
+    interventionRisk.className = `riskBadge risk-${risk.level}`;
+}
+
+function inferInterventionRisk(intervention) {
+    const text = [
+        intervention.command,
+        intervention.filePath,
+        intervention.detail,
+        intervention.toolName
+    ].filter(Boolean).join(' ').toLowerCase();
+
+    if (/(rm\s+-rf|sudo\s+|chmod\s+|chown\s+|dd\s+if=|mkfs|diskutil|format\s+|git\s+push|curl[^|;&]*\|\s*(sh|bash)|wget[^|;&]*\|\s*(sh|bash))/.test(text)) {
+        return { level: 'danger', label: 'Danger' };
+    }
+    if (/(\.env|id_rsa|private[_-]?key|secret|token|credential|delete|remove|write|edit|patch|network|fetch|http)/.test(text)) {
+        return { level: 'caution', label: 'Caution' };
+    }
+    if (/(\bls\b|\brg\b|\bgrep\b|\bcat\b|\bsed\b|\bgit status\b|\bgit diff\b|\bpwd\b)/.test(text)) {
+        return { level: 'safe', label: 'Safe' };
+    }
+    return { level: 'caution', label: 'Caution' };
+}
+
 function compactText(value, maxLength) {
     const text = String(value || '').replace(/\s+/g, ' ').trim();
     if (!text) {
@@ -973,6 +1566,20 @@ function formatMoney(value, currency) {
     return `${symbol}${numeric.toFixed(2)}`;
 }
 
+function formatCompactNumber(value) {
+    const numeric = Number(value);
+    if (!Number.isFinite(numeric) || numeric <= 0) {
+        return '0';
+    }
+    if (numeric >= 1_000_000) {
+        return `${(numeric / 1_000_000).toFixed(1)}M`;
+    }
+    if (numeric >= 1000) {
+        return `${(numeric / 1000).toFixed(1)}k`;
+    }
+    return `${Math.round(numeric)}`;
+}
+
 function formatResetDate(value) {
     const date = new Date(value);
     if (Number.isNaN(date.getTime())) {
@@ -996,10 +1603,7 @@ function formatResetDate(value) {
 }
 
 function updateCompactVisibility() {
-    const compact = Boolean(pendingIntervention);
-    sessionsList.classList.toggle('hidden', compact || !sessionsList.innerHTML);
-    accountsList.classList.toggle('compactHidden', compact);
-    syncButton.classList.toggle('compactHidden', compact);
+    renderActiveView();
 }
 
 function scheduleExpandedHeightSync() {
@@ -1052,10 +1656,16 @@ function scheduleExpandedHeightSync() {
             contentHeight += (visibleChildrenCount - 1) * gap;
         }
 
-        const desiredHeight = Math.ceil(topPadding + headerHeight + gap + contentHeight + bottomPadding + actionBarHeight);
+        const fixedPanelViews = ['home', 'agents', 'usage', 'rules'];
+        const viewMinimum = fixedPanelViews.includes(activeView) ? 640 : 0;
+        const naturalHeight = Math.ceil(topPadding + headerHeight + gap + contentHeight + bottomPadding + actionBarHeight);
+        const desiredHeight = Math.max(
+            viewMinimum,
+            fixedPanelViews.includes(activeView) ? Math.min(naturalHeight, viewMinimum) : naturalHeight
+        );
 
-        // Cap: never exceed 92% of available work area
-        const maxH = Math.round(window.screen.availHeight * 0.85);
+        // Cap expanded panels close to work area while keeping the floating feel.
+        const maxH = Math.round(window.screen.availHeight * 0.92);
         const clampedHeight = Math.min(desiredHeight, maxH);
 
         if (Math.abs(clampedHeight - lastExpandedHeight) < 8) {
@@ -1113,6 +1723,11 @@ ipcRenderer.on('island-force-expand', () => {
     expandIsland();
 });
 
+ipcRenderer.on('island-open-view', (_event, view) => {
+    setActiveView(view || 'home');
+    expandIsland();
+});
+
 ipcRenderer.on('intervention-state', (_event, intervention) => {
     if (!intervention) {
         respondingInterventionId = null;
@@ -1125,13 +1740,37 @@ ipcRenderer.on('runtime-warning', (_event, warning) => {
 });
 
 ipcRenderer.on('hook-event', (_event, payload) => {
-    if (currentData && payload.summary) {
+    if (currentData) {
         const sessions = currentData.sessions || [];
         const existingIdx = sessions.findIndex(s => s.id === payload.sessionID);
+        const nextSession = {
+            ...(existingIdx >= 0 ? sessions[existingIdx] : {}),
+            id: payload.sessionID,
+            source: payload.source,
+            status: payload.status || (existingIdx >= 0 ? sessions[existingIdx].status : 'Active'),
+            activity: payload.summary || (existingIdx >= 0 ? sessions[existingIdx].activity : ''),
+            activityDetail: payload.activityDetail || (existingIdx >= 0 ? sessions[existingIdx].activityDetail : ''),
+            toolName: payload.toolName || (existingIdx >= 0 ? sessions[existingIdx].toolName : ''),
+            command: payload.command || (existingIdx >= 0 ? sessions[existingIdx].command : ''),
+            filePath: payload.filePath || (existingIdx >= 0 ? sessions[existingIdx].filePath : ''),
+            lastEvent: payload.event,
+            updatedAt: Date.now(),
+            jumpTarget: payload.jumpTarget || (existingIdx >= 0 ? sessions[existingIdx].jumpTarget : null),
+        };
+        const existingEvents = existingIdx >= 0 && Array.isArray(sessions[existingIdx].events)
+            ? sessions[existingIdx].events
+            : [];
+        nextSession.events = payload.timelineEvent
+            ? [payload.timelineEvent, ...existingEvents].slice(0, 8)
+            : existingEvents;
         if (existingIdx >= 0) {
-            sessions[existingIdx].status = payload.summary;
+            sessions[existingIdx] = nextSession;
+        } else {
+            sessions.unshift(nextSession);
         }
+        currentData.sessions = sessions.slice(0, 5);
         renderSessions(currentData.sessions || []);
+        renderSetupHealth(currentData);
     }
 });
 
@@ -1249,6 +1888,9 @@ async function sendInterventionDecision(decision, answer = '') {
     denyButton.disabled = true;
     try {
         const ok = await ipcRenderer.invoke('intervention:respond', { decision, answer });
+        if (ok && decision === 'approve_always') {
+            loadApprovalRules();
+        }
         if (!ok) {
             respondingInterventionId = null;
             approveButton.disabled = false;
@@ -1439,9 +2081,19 @@ function renderAccounts(accounts, syncHeight = true) {
         return;
     }
 
-    accountsList.innerHTML = visibleAccounts
-        .map((account) => renderAccountCard(account))
-        .join('');
+    const liveAccounts = visibleAccounts.filter(account => !['setup', 'error', 'stale'].includes(account.status));
+    const setupAccounts = visibleAccounts.filter(account => ['setup', 'error', 'stale'].includes(account.status));
+    const sections = [];
+    if (liveAccounts.length) {
+        sections.push(liveAccounts.map((account) => renderAccountCard(account)).join(''));
+    }
+    if (setupAccounts.length) {
+        sections.push(`
+            <div class="sectionLabel">Needs setup</div>
+            ${setupAccounts.map((account) => renderAccountCard(account)).join('')}
+        `);
+    }
+    accountsList.innerHTML = sections.join('');
 
     if (syncHeight) {
         scheduleExpandedHeightSync();
@@ -1460,7 +2112,8 @@ Promise.all([
     ipcRenderer.invoke('island:get-data'),
     ipcRenderer.invoke('island:get-intervention'),
     loadProviderVisibility(),
-    loadSettings()
+    loadSettings(),
+    loadApprovalRules()
 ]).then(([data, intervention]) => {
     renderShortcuts();
     renderSummary(data);
@@ -1489,7 +2142,7 @@ function showUpdateBanner(status, message) {
             });
             break;
         case 'up-to-date':
-            el.textContent = 'ThatIsOK is up to date.';
+            el.textContent = 'Agent Gate is up to date.';
             setTimeout(() => { el.textContent = ''; el.classList.add('hidden'); }, 4000);
             break;
         case 'error':

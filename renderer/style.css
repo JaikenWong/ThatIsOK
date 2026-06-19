@@ -532,8 +532,21 @@ body, html {
     -ms-overflow-style: none;
 }
 
+#island.panelView .accounts {
+    max-height: 430px;
+    overflow: auto;
+}
+
 .accounts::-webkit-scrollbar {
     display: none;
+}
+
+.sectionLabel {
+    margin: 4px 0 1px;
+    font-size: 9px;
+    font-weight: 850;
+    text-transform: uppercase;
+    color: rgba(255, 205, 110, 0.72);
 }
 
 .topStack {
@@ -541,6 +554,467 @@ body, html {
     flex-direction: column;
     gap: 6px;
     padding-top: 2px;
+}
+
+.viewTabs {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 4px;
+    padding: 2px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    -webkit-app-region: no-drag;
+}
+
+.viewTab {
+    border: 0;
+    border-radius: 8px;
+    height: 24px;
+    color: rgba(255, 255, 255, 0.58);
+    background: transparent;
+    font-size: 10px;
+    font-weight: 750;
+    cursor: pointer;
+}
+
+.viewTab.active {
+    color: rgba(255, 255, 255, 0.95);
+    background: rgba(255, 255, 255, 0.12);
+}
+
+.setupHealth {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+}
+
+#island.panelView .setupHealth {
+    display: grid;
+    grid-template-rows: 48px minmax(0, 1fr);
+    gap: 7px;
+    height: 430px;
+    max-height: 430px;
+    overflow: hidden;
+    scrollbar-width: none;
+}
+
+#island.panelView .setupHealth::-webkit-scrollbar {
+    display: none;
+}
+
+.healthSummary {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+}
+
+.healthSummary > div {
+    min-height: 42px;
+    padding: 6px 7px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.045);
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    box-sizing: border-box;
+}
+
+.healthSummary strong {
+    display: block;
+    font-size: 17px;
+    line-height: 1;
+}
+
+.healthSummary span {
+    display: block;
+    margin-top: 5px;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.48);
+    white-space: nowrap;
+}
+
+.todayTokens {
+    display: grid;
+    grid-template-columns: minmax(116px, 0.34fr) minmax(0, 1fr);
+    gap: 7px;
+    min-height: 72px;
+    padding: 7px;
+    border-radius: 10px;
+    background: rgba(92, 225, 160, 0.07);
+    border: 1px solid rgba(92, 225, 160, 0.13);
+    box-sizing: border-box;
+}
+
+.todayTokensMain {
+    min-width: 0;
+}
+
+.todayTokensMain span {
+    display: block;
+    font-size: 9px;
+    font-weight: 850;
+    text-transform: uppercase;
+    color: rgba(161, 247, 205, 0.68);
+}
+
+.todayTokensMain strong {
+    display: block;
+    margin-top: 3px;
+    font-size: 22px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.96);
+}
+
+.todayTokensSplit {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    align-items: end;
+    gap: 4px;
+    min-width: 0;
+}
+
+.todayTokensSplit span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 4px 5px;
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.045);
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 9px;
+    font-weight: 750;
+    box-sizing: border-box;
+}
+
+.homeUsageFloor {
+    display: grid;
+    grid-template-columns: 1fr;
+    grid-template-rows: 72px minmax(0, 1fr);
+    gap: 7px;
+    min-height: 0;
+    flex: 1 1 auto;
+}
+
+.homeActivityMini,
+.homeTokenBars {
+    min-width: 0;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    box-sizing: border-box;
+}
+
+.homeActivityMini {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.homeActivityMini div {
+    display: block;
+    min-width: 0;
+    padding: 10px 8px;
+    border-right: 1px solid rgba(255, 255, 255, 0.045);
+    border-bottom: 0;
+}
+
+.homeActivityMini div:last-child {
+    border-right: 0;
+}
+
+.homeActivityMini strong {
+    font-size: 16px;
+    line-height: 1;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.homeActivityMini span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.46);
+}
+
+.homeTokenBars {
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 8px;
+    padding: 10px;
+}
+
+.homeTokenRow {
+    display: grid;
+    grid-template-columns: 62px minmax(0, 1fr) 42px;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+}
+
+.homeTokenRow span,
+.homeTokenRow strong,
+.homeTokenEmpty {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    font-weight: 800;
+}
+
+.homeTokenRow span {
+    color: rgba(255, 255, 255, 0.54);
+}
+
+.homeTokenRow strong {
+    text-align: right;
+    color: rgba(185, 255, 219, 0.88);
+}
+
+.homeTokenRow div {
+    height: 7px;
+    border-radius: 999px;
+    background: rgba(255, 255, 255, 0.055);
+    overflow: hidden;
+}
+
+.homeTokenRow i {
+    display: block;
+    height: 100%;
+    border-radius: inherit;
+    background: linear-gradient(90deg, rgba(92, 225, 160, 0.92), rgba(97, 191, 255, 0.86));
+}
+
+.homeTokenEmpty {
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.homeDashboard {
+    display: grid;
+    grid-template-columns: minmax(180px, 0.46fr) minmax(0, 1fr);
+    gap: 7px;
+    min-height: 0;
+}
+
+.homeMetrics {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+    min-height: 0;
+}
+
+.healthGrid,
+.rulesList {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.rulesPanel {
+    display: grid;
+    grid-template-rows: 32px 24px minmax(0, 1fr);
+    gap: 7px;
+    min-height: 0;
+    position: relative;
+}
+
+#island.panelView .rulesPanel {
+    flex: 1 1 auto;
+    height: auto;
+    max-height: none;
+}
+
+#island.panelView .rulesList {
+    overflow: auto;
+    min-height: 0;
+    padding-top: 1px;
+    scrollbar-width: none;
+}
+
+#island.panelView .rulesList::-webkit-scrollbar {
+    display: none;
+}
+
+.rulesSearch {
+    width: 100%;
+    height: 32px;
+    min-height: 32px;
+    box-sizing: border-box;
+    border: 1px solid rgba(255, 255, 255, 0.075);
+    border-radius: 10px;
+    padding: 0 10px;
+    margin: 0;
+    outline: none;
+    background: rgba(0, 0, 0, 0.2);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 11px;
+    font-weight: 650;
+    line-height: 32px;
+    appearance: none;
+    -webkit-appearance: none;
+    -webkit-app-region: no-drag;
+}
+
+.rulesSearch::placeholder {
+    color: rgba(255, 255, 255, 0.38);
+}
+
+.rulesSearch:focus {
+    border-color: rgba(92, 225, 160, 0.32);
+    box-shadow: 0 0 0 2px rgba(92, 225, 160, 0.08);
+}
+
+.rulesFilters {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -webkit-app-region: no-drag;
+}
+
+.rulesFilters::-webkit-scrollbar {
+    display: none;
+}
+
+.rulesFilter {
+    flex: 0 0 auto;
+    height: 24px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 8px;
+    padding: 0 8px;
+    background: rgba(255, 255, 255, 0.035);
+    color: rgba(255, 255, 255, 0.5);
+    font-size: 9px;
+    font-weight: 800;
+    cursor: pointer;
+}
+
+.rulesFilter.active {
+    color: rgba(185, 255, 219, 0.96);
+    background: rgba(92, 225, 160, 0.12);
+    border-color: rgba(92, 225, 160, 0.24);
+}
+
+.healthItem,
+.ruleRow {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-height: 29px;
+    padding: 4px 6px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    box-sizing: border-box;
+}
+
+.healthGrid {
+    min-height: 0;
+    overflow: hidden;
+}
+
+.healthGrid .healthItem {
+    min-height: 0;
+    flex: 1 1 0;
+}
+
+.healthLeft {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.healthName,
+.ruleText {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.ruleRow.expanded .ruleText {
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.35;
+}
+
+.healthName {
+    flex: 1;
+    font-size: 10px;
+    font-weight: 700;
+}
+
+.healthState {
+    flex: 0 0 auto;
+    font-size: 9px;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.62);
+}
+
+.healthQuota {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 2px;
+    flex: 0 0 auto;
+    min-width: 48px;
+    max-width: 92px;
+    overflow: hidden;
+    font-size: 9px;
+    font-weight: 800;
+    color: rgba(185, 255, 219, 0.88);
+    text-align: right;
+}
+
+.healthQuota span,
+.healthQuota strong {
+    display: block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    line-height: 1;
+}
+
+.healthQuota span {
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.healthQuota.muted {
+    display: block;
+    color: rgba(255, 255, 255, 0.42);
+    white-space: nowrap;
+    text-overflow: ellipsis;
+}
+
+.health-ok .healthState {
+    color: rgba(92, 225, 160, 0.95);
+}
+
+.health-bad .healthState {
+    color: rgba(255, 120, 120, 0.95);
+}
+
+.health-setup .healthState {
+    color: rgba(255, 205, 110, 0.95);
+}
+
+.emptyState {
+    padding: 14px 10px;
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px dashed rgba(255, 255, 255, 0.09);
+    color: rgba(255, 255, 255, 0.48);
+    font-size: 10px;
+    text-align: center;
 }
 
 .providersPanel {
@@ -819,28 +1293,320 @@ body, html {
     text-transform: uppercase;
 }
 
-.sessionRow {
+.agentsShell {
+    display: grid;
+    grid-template-columns: minmax(160px, 0.42fr) minmax(0, 1fr);
+    gap: 9px;
+    min-height: 240px;
+}
+
+#island.agentsView .agentsShell {
+    min-height: 430px;
+}
+
+.agentsShell > .emptyState {
+    grid-column: 1 / -1;
+}
+
+.agentList {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    min-width: 0;
+}
+
+.agentListItem {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    width: 100%;
+    min-height: 42px;
+    padding: 7px 6px;
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    border-radius: 10px;
+    background: rgba(255, 255, 255, 0.035);
+    color: inherit;
+    cursor: pointer;
+    text-align: left;
+    -webkit-app-region: no-drag;
+}
+
+.agentListItem.active {
+    background: rgba(92, 225, 160, 0.09);
+    border-color: rgba(92, 225, 160, 0.2);
+}
+
+.agentDot {
+    width: 7px;
+    height: 7px;
+    margin-top: 4px;
+    border-radius: 50%;
+    background: rgba(92, 225, 160, 0.95);
+    box-shadow: 0 0 12px rgba(92, 225, 160, 0.4);
+    flex: 0 0 auto;
+}
+
+.agentListMain {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+}
+
+.agentDetail {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    min-width: 0;
+    padding: 8px;
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.05), rgba(255, 255, 255, 0.026));
+    border: 1px solid rgba(255, 255, 255, 0.065);
+}
+
+.agentDetailTop {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.agentTitle {
+    font-size: 12px;
+    font-weight: 850;
+    color: rgba(255, 255, 255, 0.95);
+}
+
+.agentSummary {
+    padding: 7px;
+    border-radius: 9px;
+    background: rgba(92, 225, 160, 0.075);
+    border: 1px solid rgba(92, 225, 160, 0.12);
+    color: rgba(214, 255, 235, 0.94);
+    font-size: 11px;
+    font-weight: 750;
+    line-height: 1.35;
+    word-break: break-word;
+}
+
+.agentActivityFull {
+    margin: 0;
+    padding: 8px;
+    border-radius: 9px;
+    background: rgba(0, 0, 0, 0.26);
+    border: 1px solid rgba(255, 255, 255, 0.055);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 11px;
+    line-height: 1.35;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 240px;
+    overflow: auto;
+    scrollbar-width: none;
+}
+
+#island.agentsView .agentActivityFull {
+    max-height: 300px;
+}
+
+.agentActivityFull::-webkit-scrollbar {
+    display: none;
+}
+
+.agentDetailGrid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 5px;
+}
+
+.agentField {
+    min-width: 0;
+    padding: 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.agentField.wide {
+    grid-column: 1 / -1;
+}
+
+.agentField span,
+.agentField strong {
+    display: block;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.agentField span {
+    margin-bottom: 3px;
+    font-size: 8px;
+    font-weight: 800;
+    color: rgba(255, 255, 255, 0.38);
+    text-transform: uppercase;
+}
+
+.agentField strong {
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.82);
+}
+
+.agentJump {
+    width: 100%;
+    justify-content: center;
+    min-height: 28px;
+}
+
+.agentTimeline {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    max-height: 170px;
+    overflow: auto;
+    scrollbar-width: none;
+}
+
+#island.agentsView .agentTimeline {
+    max-height: 220px;
+}
+
+.agentTimeline::-webkit-scrollbar {
+    display: none;
+}
+
+.timelineItem {
+    display: grid;
+    grid-template-columns: 10px minmax(0, 1fr);
+    gap: 7px;
+}
+
+.timelineDot {
+    width: 7px;
+    height: 7px;
+    margin-top: 5px;
+    border-radius: 50%;
+    background: rgba(97, 191, 255, 0.92);
+    box-shadow: 0 0 10px rgba(97, 191, 255, 0.35);
+}
+
+.timelineBody {
+    min-width: 0;
+    padding: 6px 7px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.035);
+    border: 1px solid rgba(255, 255, 255, 0.045);
+}
+
+.timelineTop {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    min-height: 22px;
-    padding: 3px 6px;
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.05);
+    margin-bottom: 3px;
+}
+
+.timelineTop span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    font-weight: 850;
+    color: rgba(169, 221, 255, 0.92);
+}
+
+.timelineTop em {
+    flex: 0 0 auto;
+    font-style: normal;
+    font-size: 8px;
+    color: rgba(255, 255, 255, 0.38);
+}
+
+.timelineSummary {
+    color: rgba(255, 255, 255, 0.76);
+    font-size: 10px;
+    line-height: 1.3;
+    word-break: break-word;
+}
+
+.compactEmpty {
+    padding: 8px;
+}
+
+@media (max-width: 430px) {
+    .agentsShell {
+        grid-template-columns: minmax(104px, 0.42fr) minmax(0, 1fr);
+        gap: 7px;
+        min-height: 170px;
+    }
+
+    .agentDetailGrid {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+}
+
+.sessionRow {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 7px;
+    min-height: 42px;
+    padding: 7px;
+    border-radius: 10px;
+    background: linear-gradient(180deg, rgba(255, 255, 255, 0.045), rgba(255, 255, 255, 0.025));
+    border: 1px solid rgba(255, 255, 255, 0.055);
+}
+
+.sessionMain {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    min-width: 0;
+    flex: 1 1 auto;
 }
 
 .sessionName {
     font-size: 10px;
-    font-weight: 600;
-    opacity: 0.76;
+    font-weight: 850;
+    color: rgba(92, 225, 160, 0.92);
 }
 
-.sessionValue {
+.sessionActivity {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 11px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.92);
+}
+
+.sessionTime {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.42);
+}
+
+.sessionStatus {
+    flex: 0 0 auto;
     font-size: 10px;
-    opacity: 0.72;
-    text-transform: capitalize;
+    font-weight: 800;
+    color: rgba(255, 220, 150, 0.92);
+    background: rgba(255, 190, 90, 0.12);
+    border: 1px solid rgba(255, 190, 90, 0.14);
+    border-radius: 999px;
+    padding: 3px 6px;
+    max-width: 86px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .sessionJump {
@@ -983,13 +1749,34 @@ body, html {
 }
 
 .sourceBadge,
-.toolBadge {
+.toolBadge,
+.riskBadge {
     font-size: 10px;
     line-height: 1;
     padding: 4px 7px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.08);
     color: rgba(255, 255, 255, 0.9);
+}
+
+.riskBadge {
+    margin-right: auto;
+    font-weight: 800;
+}
+
+.risk-safe {
+    background: rgba(92, 225, 160, 0.15);
+    color: rgba(160, 246, 205, 0.96);
+}
+
+.risk-caution {
+    background: rgba(255, 190, 90, 0.16);
+    color: rgba(255, 220, 158, 0.96);
+}
+
+.risk-danger {
+    background: rgba(255, 90, 90, 0.18);
+    color: rgba(255, 168, 168, 0.98);
 }
 
 .source-claude .sourceBadge {
@@ -1208,12 +1995,15 @@ body, html {
 }
 
 .sessionJump {
-    background: none;
-    border: none;
-    color: rgba(97, 191, 255, 0.8);
+    flex: 0 0 auto;
+    border: 0;
+    border-radius: 7px;
+    padding: 4px 7px;
+    background: rgba(97, 191, 255, 0.14);
+    color: rgba(169, 221, 255, 0.92);
     cursor: pointer;
-    font-size: 11px;
-    padding: 0 4px;
+    font-size: 10px;
+    font-weight: 800;
     -webkit-app-region: no-drag;
 }
 
@@ -1221,7 +2011,120 @@ body, html {
     color: #a9ddff;
 }
 
+.ruleRow {
+    justify-content: space-between;
+    cursor: pointer;
+    transition: background 0.12s ease, border-color 0.12s ease;
+}
+
+.ruleRow:hover,
+.ruleRow.expanded {
+    background: rgba(255, 255, 255, 0.06);
+    border-color: rgba(92, 225, 160, 0.16);
+}
+
+.ruleMain {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+    min-width: 0;
+    flex: 1 1 auto;
+}
+
+.ruleSource {
+    font-size: 9px;
+    font-weight: 800;
+    color: rgba(92, 225, 160, 0.88);
+    line-height: 1;
+}
+
+.ruleText {
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.9);
+    line-height: 1.2;
+}
+
+.ruleMeta {
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.46);
+    line-height: 1.1;
+}
+
+.ruleDelete {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex: 0 0 24px;
+    width: 24px;
+    height: 24px;
+    border: 0;
+    border-radius: 7px;
+    padding: 0;
+    background: rgba(255, 90, 90, 0.1);
+    color: rgba(255, 170, 170, 0.95);
+    cursor: pointer;
+    -webkit-app-region: no-drag;
+}
+
+.ruleDelete:hover {
+    background: rgba(255, 90, 90, 0.18);
+    color: rgba(255, 210, 210, 0.98);
+}
+
+.ruleDelete svg {
+    width: 13px;
+    height: 13px;
+    fill: currentColor;
+}
+
+.rulesUndo {
+    position: absolute;
+    right: 4px;
+    bottom: 4px;
+    z-index: 30;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 30px;
+    max-width: calc(100% - 8px);
+    padding: 5px 6px 5px 10px;
+    border-radius: 10px;
+    background: rgba(20, 23, 24, 0.94);
+    border: 1px solid rgba(92, 225, 160, 0.22);
+    box-shadow: 0 12px 28px rgba(0, 0, 0, 0.34);
+    box-sizing: border-box;
+    -webkit-app-region: no-drag;
+}
+
+.rulesUndo span {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.78);
+}
+
+.rulesUndo button {
+    flex: 0 0 auto;
+    height: 22px;
+    border: 0;
+    border-radius: 7px;
+    padding: 0 8px;
+    background: rgba(92, 225, 160, 0.16);
+    color: rgba(186, 255, 220, 0.96);
+    font-size: 9px;
+    font-weight: 850;
+    cursor: pointer;
+}
+
 .compactHidden {
+    display: none !important;
+}
+
+.viewHidden {
     display: none !important;
 }
 

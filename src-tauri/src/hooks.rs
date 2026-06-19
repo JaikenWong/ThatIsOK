@@ -12,7 +12,7 @@ use tokio::sync::oneshot;
 use crate::{
     build_intervention, is_managed_command, is_persistently_allowed, now_millis,
     pending_intervention_json, refresh_opencode_local_usage, AppState, PendingIntervention,
-    SessionInfo, ALL_HOOK_EVENTS, CLAUDE_HOOK_EVENTS, CODEX_HOOK_EVENTS, MANAGED_KEY,
+    SessionEvent, SessionInfo, ALL_HOOK_EVENTS, CLAUDE_HOOK_EVENTS, CODEX_HOOK_EVENTS, MANAGED_KEY,
 };
 
 pub fn run_hook_bridge_from_args() -> bool {
@@ -597,6 +597,11 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
         .unwrap_or("unknown");
     let raw = data.get("raw").and_then(Value::as_str).unwrap_or("");
     let payload = data.get("payload").cloned().unwrap_or(Value::Null);
+    let activity = build_event_summary(source, event_name, &payload);
+    let activity_detail = build_event_detail(source, event_name, &payload);
+    let tool_name = event_tool_name(&payload);
+    let command = event_command(&payload);
+    let file_path = event_file_path(&payload);
 
     {
         let app_state = app.state::<AppState>();
@@ -620,7 +625,27 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
         if !new_status.is_empty() {
             entry.status = new_status;
         }
-        entry.updated_at = now_millis();
+        if !activity.is_empty() {
+            entry.activity = activity.clone();
+        }
+        if !activity_detail.is_empty() {
+            entry.activity_detail = activity_detail.clone();
+        }
+        entry.tool_name = tool_name.clone();
+        entry.command = command.clone();
+        entry.file_path = file_path.clone();
+        let now = now_millis();
+        entry.events.insert(
+            0,
+            SessionEvent {
+                event: event_name.to_string(),
+                summary: activity.clone(),
+                detail: activity_detail.clone(),
+                created_at: now,
+            },
+        );
+        entry.events.truncate(8);
+        entry.updated_at = now;
         entry.last_event = event_name.to_string();
         if let Some(jt) = payload
             .get("jump_target")
@@ -663,21 +688,37 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
         });
     }
 
-    if event_lower != "permissionrequest" && event_lower != "permission_request" {
-        let _ = app.emit(
-            "hook-event",
-            json!({
-                "source": source,
+    let session_id = payload
+        .get("session_id")
+        .or_else(|| payload.get("sessionId"))
+        .or_else(|| data.get("session_id"))
+        .or_else(|| data.get("sessionId"))
+        .and_then(Value::as_str)
+        .unwrap_or(source);
+    let _ = app.emit(
+        "hook-event",
+        json!({
+            "source": source,
+            "event": event_name,
+            "sessionID": session_id,
+            "status": map_session_status(event_name),
+            "summary": activity,
+            "activityDetail": activity_detail,
+            "toolName": tool_name,
+            "command": command,
+            "filePath": file_path,
+            "timelineEvent": {
                 "event": event_name,
-                "sessionID": payload.get("session_id")
-                    .or_else(|| payload.get("sessionId"))
-                    .or_else(|| data.get("session_id"))
-                    .or_else(|| data.get("sessionId"))
-                    .and_then(Value::as_str)
-                    .unwrap_or(source),
-                "summary": build_event_summary(source, event_name, &payload),
-            }),
-        );
+                "summary": activity,
+                "detail": activity_detail,
+                "createdAt": now_millis(),
+            },
+            "jumpTarget": payload.get("jump_target")
+                .or_else(|| payload.get("jumpTarget"))
+        }),
+    );
+
+    if event_lower != "permissionrequest" && event_lower != "permission_request" {
         return json!({ "ok": true, "recorded": true });
     }
 
@@ -841,21 +882,10 @@ fn register_opencode_plugin(home: &Path, plugin_path: &Path) -> Result<(), Strin
 }
 
 fn build_event_summary(source: &str, event_name: &str, payload: &Value) -> String {
-    let tool = payload
-        .get("tool_name")
-        .or_else(|| payload.get("toolName"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let cmd = payload
-        .get("command")
-        .or_else(|| payload.get("cmd"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
-    let prompt = payload
-        .get("prompt")
-        .or_else(|| payload.get("message"))
-        .and_then(Value::as_str)
-        .unwrap_or("");
+    let tool = event_tool_name(payload);
+    let cmd = event_command(payload);
+    let file_path = event_file_path(payload);
+    let prompt = event_prompt(payload);
 
     let event_lower = event_name.to_lowercase();
     let info = lookup_event_info(event_name);
@@ -871,15 +901,38 @@ fn build_event_summary(source: &str, event_name: &str, payload: &Value) -> Strin
         "userpromptsubmit" | "user_prompt_submit"
     ) {
         if !prompt.is_empty() {
-            return format!("Prompt: {}", truncate_chars(prompt, 80));
+            return format!("Prompt: {}", truncate_chars(&prompt, 80));
         }
         return info.map(|i| i.summary.to_string()).unwrap_or_default();
+    }
+
+    if matches!(
+        event_lower.as_str(),
+        "permissionrequest" | "permission_request"
+    ) {
+        if !cmd.is_empty() {
+            return format!("Waiting approval: {}", truncate_chars(&cmd, 72));
+        }
+        if !file_path.is_empty() && !tool.is_empty() {
+            return format!(
+                "Waiting approval: {} {}",
+                tool,
+                truncate_chars(&file_path, 56)
+            );
+        }
+        if !tool.is_empty() {
+            return format!("Waiting approval: {tool}");
+        }
+        return "Waiting approval".to_string();
     }
 
     // "pretooluse" with tool/cmd details
     if matches!(event_lower.as_str(), "pretooluse" | "pre_tool_use") {
         if !tool.is_empty() && !cmd.is_empty() {
-            return format!("Running {}: {}", tool, truncate_chars(cmd, 60));
+            return format!("Running {}: {}", tool, truncate_chars(&cmd, 60));
+        }
+        if !tool.is_empty() && !file_path.is_empty() {
+            return format!("Running {} on {}", tool, truncate_chars(&file_path, 56));
         }
         if !tool.is_empty() {
             return format!("Running {}", tool);
@@ -897,6 +950,115 @@ fn build_event_summary(source: &str, event_name: &str, payload: &Value) -> Strin
 
     // All other events use the static summary from lookup
     info.map(|i| i.summary.to_string()).unwrap_or_default()
+}
+
+fn build_event_detail(source: &str, event_name: &str, payload: &Value) -> String {
+    let mut parts = Vec::new();
+    parts.push(format!("Source: {}", format_source_label(source)));
+    parts.push(format!("Event: {event_name}"));
+
+    let tool = event_tool_name(payload);
+    if !tool.is_empty() {
+        parts.push(format!("Tool: {tool}"));
+    }
+
+    let prompt = event_prompt(payload);
+    if !prompt.is_empty() {
+        parts.push(format!("Prompt:\n{}", truncate_chars(&prompt, 900)));
+    }
+
+    let command = event_command(payload);
+    if !command.is_empty() {
+        parts.push(format!("Command:\n{}", truncate_chars(&command, 900)));
+    }
+
+    let file_path = event_file_path(payload);
+    if !file_path.is_empty() {
+        parts.push(format!("File:\n{}", truncate_chars(&file_path, 500)));
+    }
+
+    if let Some(input) = payload
+        .get("tool_input")
+        .or_else(|| payload.get("toolInput"))
+        .or_else(|| payload.get("input"))
+        .or_else(|| payload.get("parameters"))
+        .or_else(|| payload.get("arguments"))
+    {
+        parts.push(format!(
+            "Tool input:\n{}",
+            truncate_chars(&json_preview(input), 1200)
+        ));
+    } else {
+        parts.push(format!(
+            "Payload:\n{}",
+            truncate_chars(&json_preview(payload), 1200)
+        ));
+    }
+
+    parts.join("\n\n")
+}
+
+fn event_tool_name(payload: &Value) -> String {
+    payload
+        .get("tool_name")
+        .or_else(|| payload.get("toolName"))
+        .or_else(|| payload.get("tool"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn event_command(payload: &Value) -> String {
+    payload
+        .get("command")
+        .or_else(|| payload.get("cmd"))
+        .or_else(|| nested_string(payload, &["tool_input", "command"]))
+        .or_else(|| nested_string(payload, &["toolInput", "command"]))
+        .or_else(|| nested_string(payload, &["input", "command"]))
+        .or_else(|| nested_string(payload, &["parameters", "command"]))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn event_file_path(payload: &Value) -> String {
+    payload
+        .get("file_path")
+        .or_else(|| payload.get("filePath"))
+        .or_else(|| payload.get("path"))
+        .or_else(|| nested_string(payload, &["tool_input", "file_path"]))
+        .or_else(|| nested_string(payload, &["toolInput", "filePath"]))
+        .or_else(|| nested_string(payload, &["tool_input", "path"]))
+        .or_else(|| nested_string(payload, &["toolInput", "path"]))
+        .or_else(|| nested_string(payload, &["input", "path"]))
+        .or_else(|| nested_string(payload, &["parameters", "path"]))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn event_prompt(payload: &Value) -> String {
+    payload
+        .get("prompt")
+        .or_else(|| payload.get("message"))
+        .or_else(|| payload.get("reason"))
+        .or_else(|| payload.get("questionPrompt"))
+        .or_else(|| payload.get("question_prompt"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string()
+}
+
+fn json_preview(value: &Value) -> String {
+    serde_json::to_string_pretty(value).unwrap_or_else(|_| value.to_string())
+}
+
+fn nested_string<'a>(payload: &'a Value, path: &[&str]) -> Option<&'a Value> {
+    let mut current = payload;
+    for key in path {
+        current = current.get(*key)?;
+    }
+    Some(current)
 }
 
 /// Truncate a string to at most `max_chars` Unicode characters (byte-safe).

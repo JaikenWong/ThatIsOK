@@ -2,18 +2,29 @@
 
 > Desktop approval & usage cockpit for AI coding agents — floating, local, no telemetry.
 
-ThatIsOK is a **floating island** that lives on your desktop. It intercepts permission requests from Claude Code and Codex, and tracks usage balances across all your AI coding tools in one glance.
+ThatIsOK is a **floating island** that lives on your desktop. The in-app UI is branded as **Agent Gate**: it intercepts permission requests from coding agents, tracks quotas and balances, and shows today’s local token usage in one compact panel.
 
 <p align="center">
-  <img src="assets/images/small.png" alt="ThatIsOK collapsed — provider rings" width="320" />
-  <img src="assets/images/all.png" alt="ThatIsOK expanded — full panel with usage details" width="320" />
+  <img src="assets/images/small.png" alt="Agent Gate collapsed island" width="360" />
+</p>
+
+<p align="center">
+  <img src="assets/images/home.png" alt="Agent Gate Home dashboard with provider status and token usage" width="270" />
+  <img src="assets/images/Usage.png" alt="Agent Gate Usage view with provider toggles and quota cards" width="270" />
+</p>
+
+<p align="center">
+  <img src="assets/images/Agents.png" alt="Agent Gate Agents view with live session detail" width="270" />
+  <img src="assets/images/rules.png" alt="Agent Gate Rules view with filters and delete controls" width="270" />
 </p>
 
 ## What it does
 
-- **Permission approval** — approve, approve-always, or deny tool-use requests without tabbing back to terminal
-- **Usage tracking** — real-time progress bars for session / weekly / monthly quotas across providers
-- **Balance sync** — stays current with provider APIs so you know when you're about to run out
+- **Permission approval** — approve, create allow rules, answer ask prompts, or deny tool-use requests without tabbing back to terminal
+- **Home dashboard** — provider health, running agents, exact/estimated token usage, and today’s local activity in one view
+- **Usage tracking** — real-time progress bars for 5h / weekly / monthly quotas, credits, balances, and reset times
+- **Token accounting** — exact local token usage for Claude, Gemini, Codex, and OpenCode when their logs expose token data
+- **Rules manager** — search, filter by agent source, remove rules with undo, and inspect long commands
 - **Always on top** — a transparent, draggable island that never gets buried under other windows
 
 ## Supported providers
@@ -28,16 +39,16 @@ ThatIsOK is a **floating island** that lives on your desktop. It intercepts perm
 
 ### Usage & balance
 
-| Provider | Tracks | Source |
-|----------|--------|--------|
-| Codex | 5h / 7d rate limits | Local auth + session files |
-| Claude Code | Session cost | Local JSONL transcripts |
-| Cursor | Usage summary | Local app storage |
-| Gemini | Usage data | Local login + session data |
-| DeepSeek | API balance | `DEEPSEEK_API_KEY` |
-| MiniMax | Token plan balance | `MINIMAX_API_KEY` |
-| OpenCode Go | $12/$30/$60 limits | Local SQLite (`opencode.db`) |
-| OpenCode Zen | Model availability | OpenCode API key |
+| Provider | Tracks | Token data | Source |
+|----------|--------|------------|--------|
+| Codex | 5h / 7d rate limits | Exact today tokens from session `token_count` events | Local auth + session files |
+| Claude Code | Today messages / sessions / tools | Exact today tokens from JSONL transcripts | Local Claude data |
+| Gemini | Daily requests / sessions | Exact today tokens from Gemini logs | Local Gemini data |
+| OpenCode Go | $12 / $30 / $60 limits | Exact today tokens from SQLite session/message records | Local SQLite (`opencode.db`) |
+| OpenCode Zen | Model availability | Not exposed | OpenCode API key |
+| Kiro | Credits | Not exposed | Local Kiro DB |
+| DeepSeek | API balance | Not exposed | `DEEPSEEK_API_KEY` |
+| MiniMax | Token-plan prompt balance | Not exposed | `MINIMAX_API_KEY` |
 
 ## Install
 
@@ -71,8 +82,11 @@ npm run tauri:build   # release build → src-tauri/target/release/bundle/
 
 | Mode | What you see |
 |------|-------------|
-| **Collapsed** | Logo + provider progress rings. Each ring is a provider; fill = quota used. Hover circles for exact numbers, hover `?` badges for setup tips. |
-| **Expanded** | Click the island to expand. Full panel with toggle switches (show/hide providers), per-provider progress bars with dollar amounts and reset times, session logs, sync cadence setting. Click outside or toggle to collapse. |
+| **Collapsed** | Logo + compact provider meters. Click to open the full panel. |
+| **Home** | Provider health, live agent count, inline token summaries, exact/estimated token totals, and token bars. |
+| **Agents** | Active agent sessions, timeline, payload detail, working directory, and terminal jump target. |
+| **Usage** | Provider visibility toggles, sync cadence, version/update check, quota cards, balances, and reset times. |
+| **Rules** | Searchable allow-rule list with source filters, command preview, delete icon, and undo. |
 
 ### Global shortcuts
 
@@ -85,7 +99,7 @@ npm run tauri:build   # release build → src-tauri/target/release/bundle/
 
 ### Tray menu
 
-Right-click the tray icon (macOS menu bar / Windows system tray) for **Open**, **Sync Now**, and **Quit**.
+Right-click the tray icon (macOS menu bar / Windows system tray) for **Open**, **Sync Now**, **Install Hooks**, **Remove Hooks**, update status, and **Quit**.
 
 ## How hooks work
 
@@ -107,8 +121,9 @@ Copy `src-tauri/plugins/thatisok-opencode.js` to `~/.config/opencode/plugins/`, 
 ## Configuration
 
 - **Sync interval** — expand the island, use `+/-` buttons in the settings row (5 / 10 / 15 / 30 / 60 minutes)
-- **Provider visibility** — toggle switches in the expanded panel; hidden providers are excluded from rings and card list
-- **Approval rules** — "Approve Always" creates persistent rules stored in `~/.config/ThatIsOK/approval-rules.json`
+- **Provider visibility** — toggle switches in the Usage tab; hidden providers are excluded from Home and collapsed meters
+- **Approval rules** — "Allow Rule" creates persistent rules stored in `~/.config/ThatIsOK/approval-rules.json`
+- **Hooks** — install/remove managed hooks from the tray menu when you want to temporarily disable agent interception
 - **Hide from Dock** — macOS: app runs as accessory, tray-icon only. Windows: `skipTaskbar` by default.
 
 ## Privacy
@@ -123,7 +138,7 @@ Copy `src-tauri/plugins/thatisok-opencode.js` to `~/.config/opencode/plugins/`, 
 |---------|-------|
 | Provider shows "Stale" | Re-login to the provider, then click **Sync** |
 | No usage bars appear | Provider may need a local login before data is available — hover the `?` badge for setup instructions |
-| Ring shows half / cut off | Reduce number of visible providers; max 5 rings fit in collapsed mode |
+| Token count shows `--` | That provider does not expose local token records, or it has not synced today |
 | Hooks not working | Restart the coding agent after ThatIsOK has started |
 | Island not showing | `Ctrl/Cmd+Shift+Space` toggles visibility; check tray icon |
 

@@ -3,7 +3,9 @@ use serde_json::{json, Value};
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use crate::{epoch_to_ms, iso_from_ms, now_millis, read_env_value, read_number_value};
+use crate::{
+    epoch_to_ms, iso_from_ms, now_millis, read_env_value, read_number_value, today_date_str,
+};
 
 pub(crate) async fn fetch_codex_snapshot(
     client: &reqwest::Client,
@@ -77,6 +79,7 @@ pub(crate) async fn fetch_codex_snapshot(
 
     let effective_stale = is_stale && usage_data.is_none();
     let lines = build_codex_lines(usage_data.as_ref());
+    let token_usage = read_codex_token_usage(&codex_home);
     let message = usage_error.unwrap_or_else(|| format!("plan {display_plan}"));
     let status = if effective_stale {
         "stale"
@@ -106,6 +109,18 @@ pub(crate) async fn fetch_codex_snapshot(
         "source": source,
         "plan": plan,
         "usage": usage_data,
+        "tokenUsage": {
+            "exactInput": token_usage.input,
+            "exactOutput": token_usage.output,
+            "exactReasoning": token_usage.reasoning,
+            "exactCacheRead": token_usage.cache_read,
+            "exactCacheWrite": token_usage.cache_write,
+            "exactTotal": token_usage.input + token_usage.output + token_usage.reasoning,
+            "estimatedInput": 0,
+            "estimatedOutput": 0,
+            "estimatedTotal": 0,
+            "source": "codex-token-count"
+        },
         "lines": lines,
         "meta": {
             "planType": plan_type,
@@ -115,6 +130,15 @@ pub(crate) async fn fetch_codex_snapshot(
         },
         "message": message
     }))
+}
+
+#[derive(Default)]
+struct CodexTokenUsage {
+    input: u64,
+    output: u64,
+    reasoning: u64,
+    cache_read: u64,
+    cache_write: u64,
 }
 
 async fn fetch_codex_usage_api(
@@ -178,6 +202,13 @@ fn read_codex_session_usage(codex_home: &Path) -> Option<Value> {
             "window_minutes": p.get("window_minutes").or_else(|| p.get("windowMinutes")).and_then(Value::as_f64),
         }))
     });
+    let secondary = limits.get("secondary").and_then(|s| {
+        Some::<Value>(json!({
+            "used_percent": s.get("used_percent").or_else(|| s.get("usedPercent")).and_then(Value::as_f64).unwrap_or(0.0),
+            "resets_at": s.get("resets_at").or_else(|| s.get("reset_at")).or_else(|| s.get("resetAt")).and_then(Value::as_str),
+            "window_minutes": s.get("window_minutes").or_else(|| s.get("windowMinutes")).and_then(Value::as_f64),
+        }))
+    });
 
     Some(json!({
         "plan_type": limits.get("plan_type").or_else(|| limits.get("planType")).and_then(Value::as_str),
@@ -185,6 +216,7 @@ fn read_codex_session_usage(codex_home: &Path) -> Option<Value> {
         "captured_at": latest.get("timestamp").and_then(Value::as_str),
         "rate_limit": {
             "primary_window": primary,
+            "secondary_window": secondary,
         }
     }))
 }
@@ -240,6 +272,72 @@ fn find_latest_rate_limit_event(dir: &Path) -> Option<Value> {
     }
 
     latest
+}
+
+fn read_codex_token_usage(codex_home: &Path) -> CodexTokenUsage {
+    let sessions_dir = codex_home.join("sessions");
+    let today = today_date_str();
+    let mut usage = CodexTokenUsage::default();
+    collect_codex_token_usage(&sessions_dir, &today, &mut usage);
+    usage
+}
+
+fn collect_codex_token_usage(dir: &Path, today: &str, usage: &mut CodexTokenUsage) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_codex_token_usage(&path, today, usage);
+            continue;
+        }
+        if path.extension().and_then(|e| e.to_str()) != Some("jsonl") {
+            continue;
+        }
+        let Ok(content) = fs::read_to_string(&path) else {
+            continue;
+        };
+        for line in content.lines() {
+            if !line.contains("\"token_count\"") {
+                continue;
+            }
+            let Ok(entry) = serde_json::from_str::<Value>(line) else {
+                continue;
+            };
+            let is_today = entry
+                .get("timestamp")
+                .and_then(Value::as_str)
+                .is_some_and(|timestamp| timestamp.starts_with(today));
+            if !is_today {
+                continue;
+            }
+            let Some(last) = entry
+                .get("payload")
+                .and_then(|p| p.get("info"))
+                .and_then(|i| i.get("last_token_usage"))
+            else {
+                continue;
+            };
+            usage.input += last
+                .get("input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            usage.output += last
+                .get("output_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            usage.reasoning += last
+                .get("reasoning_output_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+            usage.cache_read += last
+                .get("cached_input_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(0);
+        }
+    }
 }
 
 async fn refresh_codex_token(
@@ -401,7 +499,13 @@ fn build_codex_lines(usage: Option<&Value>) -> Vec<Value> {
                 .or_else(|| pw.get("resetAt"))
                 .and_then(read_number_value)
                 .and_then(epoch_to_ms)
-                .map(iso_from_ms);
+                .map(iso_from_ms)
+                .or_else(|| {
+                    pw.get("resets_at")
+                        .or_else(|| pw.get("resetsAt"))
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                });
             lines.push(json!({
                 "type": "progress",
                 "label": "5h window",
@@ -427,7 +531,13 @@ fn build_codex_lines(usage: Option<&Value>) -> Vec<Value> {
                 .or_else(|| sw.get("resetAt"))
                 .and_then(read_number_value)
                 .and_then(epoch_to_ms)
-                .map(iso_from_ms);
+                .map(iso_from_ms)
+                .or_else(|| {
+                    sw.get("resets_at")
+                        .or_else(|| sw.get("resetsAt"))
+                        .and_then(Value::as_str)
+                        .map(String::from)
+                });
             lines.push(json!({
                 "type": "progress",
                 "label": "7d window",

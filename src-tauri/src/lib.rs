@@ -23,8 +23,8 @@ use tokio::sync::{oneshot, Notify};
 
 const PILL_WIDTH: u32 = 356;
 const PILL_HEIGHT: u32 = 50;
-const EXPANDED_WIDTH: u32 = 356;
-const DEFAULT_EXPANDED_HEIGHT: u32 = 404;
+const EXPANDED_WIDTH: u32 = 560;
+const DEFAULT_EXPANDED_HEIGHT: u32 = 600;
 const WINDOW_MARGIN: i32 = 12;
 const MANAGED_KEY: &str = "ThatIsOk";
 const DEFAULTS_JSON: &str = include_str!("../../config/defaults.json");
@@ -98,9 +98,23 @@ struct SessionInfo {
     id: String,
     source: String,
     status: String,
+    activity: String,
+    activity_detail: String,
+    tool_name: String,
+    command: String,
+    file_path: String,
+    events: Vec<SessionEvent>,
     updated_at: u128,
     last_event: String,
     jump_target: Option<Value>,
+}
+
+#[derive(Clone, Default)]
+struct SessionEvent {
+    event: String,
+    summary: String,
+    detail: String,
+    created_at: u128,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -162,7 +176,7 @@ struct InterventionDecision {
     answer: Option<String>,
 }
 
-#[derive(Clone, Deserialize, Serialize)]
+#[derive(Clone, Deserialize, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 struct ApprovalRule {
     source: String,
@@ -500,6 +514,13 @@ async fn fetch_opencode_snapshot(
         }
     }
 
+    let token_usage = home
+        .join(".local")
+        .join("share")
+        .join("opencode")
+        .join("opencode.db");
+    let token_usage = read_opencode_token_usage(&token_usage).unwrap_or_default();
+
     if model_count > 0 {
         lines.push(json!({
             "type": "text",
@@ -521,6 +542,18 @@ async fn fetch_opencode_snapshot(
         "source": "local_auth",
         "plan": plan,
         "lines": lines,
+        "tokenUsage": {
+            "exactInput": token_usage.input,
+            "exactOutput": token_usage.output,
+            "exactReasoning": token_usage.reasoning,
+            "exactCacheRead": token_usage.cache_read,
+            "exactCacheWrite": token_usage.cache_write,
+            "exactTotal": token_usage.input + token_usage.output + token_usage.reasoning,
+            "estimatedInput": 0,
+            "estimatedOutput": 0,
+            "estimatedTotal": 0,
+            "source": "opencode-sqlite"
+        },
         "meta": {
             "modelCount": model_count,
             "apiEndpoint": models_url,
@@ -533,6 +566,15 @@ async fn fetch_opencode_snapshot(
 struct CostRow {
     created_ms: i64,
     cost: f64,
+}
+
+#[derive(Default)]
+struct LocalTokenUsage {
+    input: u64,
+    output: u64,
+    reasoning: u64,
+    cache_read: u64,
+    cache_write: u64,
 }
 
 fn build_opencode_go_lines(db_path: &Path) -> Option<Vec<Value>> {
@@ -769,6 +811,76 @@ fn read_opencode_message_costs(conn: &Connection, now_ms: i64) -> Option<Vec<Cos
     Some(costs)
 }
 
+fn read_opencode_token_usage(db_path: &Path) -> Option<LocalTokenUsage> {
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = Connection::open(db_path).ok()?;
+    let today_start_ms = chrono::Utc::now()
+        .date_naive()
+        .and_hms_opt(0, 0, 0)?
+        .and_utc()
+        .timestamp_millis();
+
+    let mut usage = LocalTokenUsage::default();
+    if let Ok(mut stmt) = conn.prepare(
+        "SELECT
+            COALESCE(SUM(tokens_input), 0),
+            COALESCE(SUM(tokens_output), 0),
+            COALESCE(SUM(tokens_reasoning), 0),
+            COALESCE(SUM(tokens_cache_read), 0),
+            COALESCE(SUM(tokens_cache_write), 0)
+         FROM session
+         WHERE time_updated >= ?1",
+    ) {
+        let row = stmt.query_row([today_start_ms], |row| {
+            Ok(LocalTokenUsage {
+                input: row.get::<_, i64>(0)?.max(0) as u64,
+                output: row.get::<_, i64>(1)?.max(0) as u64,
+                reasoning: row.get::<_, i64>(2)?.max(0) as u64,
+                cache_read: row.get::<_, i64>(3)?.max(0) as u64,
+                cache_write: row.get::<_, i64>(4)?.max(0) as u64,
+            })
+        });
+        if let Ok(row_usage) = row {
+            usage = row_usage;
+        }
+    }
+
+    if usage.input + usage.output + usage.reasoning + usage.cache_read + usage.cache_write > 0 {
+        return Some(usage);
+    }
+
+    let mut stmt = conn
+        .prepare(
+            "SELECT data FROM message
+             WHERE json_valid(data)
+               AND time_created >= ?1
+               AND json_type(data, '$.tokens') = 'object'",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map([today_start_ms], |row| row.get::<_, String>(0))
+        .ok()?;
+    for row in rows {
+        let Ok(data_str) = row else { continue };
+        let Ok(data) = serde_json::from_str::<Value>(&data_str) else {
+            continue;
+        };
+        let Some(tokens) = data.get("tokens") else {
+            continue;
+        };
+        usage.input += tokens.get("input").and_then(Value::as_u64).unwrap_or(0);
+        usage.output += tokens.get("output").and_then(Value::as_u64).unwrap_or(0);
+        usage.reasoning += tokens.get("reasoning").and_then(Value::as_u64).unwrap_or(0);
+        if let Some(cache) = tokens.get("cache") {
+            usage.cache_read += cache.get("read").and_then(Value::as_u64).unwrap_or(0);
+            usage.cache_write += cache.get("write").and_then(Value::as_u64).unwrap_or(0);
+        }
+    }
+    Some(usage)
+}
+
 pub(crate) fn refresh_opencode_local_usage(app: &AppHandle) {
     let Some(home) = dirs::home_dir() else {
         return;
@@ -821,6 +933,20 @@ pub(crate) fn refresh_opencode_local_usage(app: &AppHandle) {
 
     lines.extend(new_usage_lines);
     account["lines"] = Value::Array(lines);
+    if let Some(token_usage) = read_opencode_token_usage(&db_path) {
+        account["tokenUsage"] = json!({
+            "exactInput": token_usage.input,
+            "exactOutput": token_usage.output,
+            "exactReasoning": token_usage.reasoning,
+            "exactCacheRead": token_usage.cache_read,
+            "exactCacheWrite": token_usage.cache_write,
+            "exactTotal": token_usage.input + token_usage.output + token_usage.reasoning,
+            "estimatedInput": 0,
+            "estimatedOutput": 0,
+            "estimatedTotal": 0,
+            "source": "opencode-sqlite"
+        });
+    }
     account["capturedAt"] = json!(now_millis());
     usage.synced_at = now_millis();
     drop(usage);
@@ -1652,6 +1778,33 @@ fn settings_set_sync_interval(app: AppHandle, minutes: u64) -> Result<Value, Str
     }))
 }
 
+#[tauri::command]
+fn approval_rules_list() -> Vec<ApprovalRule> {
+    read_approval_rules()
+}
+
+#[tauri::command]
+fn approval_rules_delete(index: usize) -> Result<Vec<ApprovalRule>, String> {
+    let mut rules = read_approval_rules();
+    if index >= rules.len() {
+        return Err("approval rule not found".to_string());
+    }
+    rules.remove(index);
+    write_approval_rules(&rules)?;
+    Ok(rules)
+}
+
+#[tauri::command]
+fn approval_rules_restore(index: usize, rule: ApprovalRule) -> Result<Vec<ApprovalRule>, String> {
+    let mut rules = read_approval_rules();
+    if !rules.iter().any(|item| item == &rule) {
+        let insert_index = index.min(rules.len());
+        rules.insert(insert_index, rule);
+        write_approval_rules(&rules)?;
+    }
+    Ok(rules)
+}
+
 fn position_initial(window: &WebviewWindow) -> Result<(), String> {
     let defaults = read_json_file("defaults.json");
     if let (Some(x), Some(y)) = (
@@ -1730,7 +1883,7 @@ fn uninstall_hooks(app: &AppHandle) -> Result<(), String> {
     hooks::remove_agent_hooks()?;
     emit_runtime_warning(
         app,
-        "ThatIsOK hooks removed. Agent integrations are disabled until hooks are installed again.",
+        "Agent Gate hooks removed. Agent integrations are disabled until hooks are installed again.",
     );
     Ok(())
 }
@@ -1821,6 +1974,9 @@ pub fn run() {
             providers_set_visibility,
             settings_get,
             settings_set_sync_interval,
+            approval_rules_list,
+            approval_rules_delete,
+            approval_rules_restore,
             app_restart,
             jump_to_terminal
         ])
@@ -1863,7 +2019,19 @@ pub fn run() {
             let tray_icon = tauri::image::Image::from_bytes(include_bytes!("../icons/32x32.png"))
                 .map_err(|e| format!("tray icon: {e}")).ok();
             if let Some(icon) = tray_icon {
-                let open = MenuItemBuilder::with_id("open", "Open")
+                let open_activity = MenuItemBuilder::with_id("open-activity", "Open Home")
+                    .build(app)
+                    .map_err(|e| format!("tray menu: {e}"))
+                    .ok();
+                let open_agents = MenuItemBuilder::with_id("open-agents", "Running Agents")
+                    .build(app)
+                    .map_err(|e| format!("tray menu: {e}"))
+                    .ok();
+                let open_usage = MenuItemBuilder::with_id("open-usage", "Usage & Providers")
+                    .build(app)
+                    .map_err(|e| format!("tray menu: {e}"))
+                    .ok();
+                let open_rules = MenuItemBuilder::with_id("open-rules", "Approval Rules")
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let sync_item = MenuItemBuilder::with_id("sync", "Sync Now")
@@ -1876,41 +2044,61 @@ pub fn run() {
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let version = app.package_info().version.to_string();
-                let update_item = MenuItemBuilder::with_id("update", format!("ThatIsOK v{version}"))
+                let update_item =
+                    MenuItemBuilder::with_id("update", format!("Agent Gate v{version}"))
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
-                let sep = PredefinedMenuItem::separator(app)
+                let sep_view = PredefinedMenuItem::separator(app)
+                    .map_err(|e| format!("tray menu: {e}")).ok();
+                let sep_hooks = PredefinedMenuItem::separator(app)
+                    .map_err(|e| format!("tray menu: {e}")).ok();
+                let sep_app = PredefinedMenuItem::separator(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let quit_item = MenuItemBuilder::with_id("quit", "Quit")
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
 
                 if let (
-                    Some(open),
+                    Some(open_activity),
+                    Some(open_agents),
+                    Some(open_usage),
+                    Some(open_rules),
                     Some(sync_item),
                     Some(install_hooks_item),
                     Some(remove_hooks_item),
                     Some(update_item),
-                    Some(sep),
+                    Some(sep_view),
+                    Some(sep_hooks),
+                    Some(sep_app),
                     Some(quit_item),
                 ) = (
-                    open,
+                    open_activity,
+                    open_agents,
+                    open_usage,
+                    open_rules,
                     sync_item,
                     install_hooks_item,
                     remove_hooks_item,
                     update_item,
-                    sep,
+                    sep_view,
+                    sep_hooks,
+                    sep_app,
                     quit_item,
                 )
                 {
                     let menu = MenuBuilder::new(app)
                         .items(&[
-                            &open,
+                            &open_activity,
+                            &open_agents,
+                            &open_usage,
+                            &open_rules,
+                            &sep_view,
                             &sync_item,
+                            &sep_hooks,
                             &install_hooks_item,
                             &remove_hooks_item,
+                            &sep_app,
                             &update_item,
-                            &sep,
                             &quit_item,
                         ])
                         .build()
@@ -1922,13 +2110,19 @@ pub fn run() {
                             .menu(&menu)
                             .on_menu_event(move |app_handle_inner, event| {
                                 match event.id().as_ref() {
-                                    "open" => {
+                                    "open-activity" | "open-agents" | "open-usage" | "open-rules" => {
                                         if let Ok(window) = main_window(&app_handle_inner) {
                                             let _ = window.show();
                                             let _ = window.set_focus();
                                         }
-                                        let _ =
-                                            set_mode(&app_handle_inner, "expanded");
+                                        let view = match event.id().as_ref() {
+                                            "open-agents" => "agents",
+                                            "open-usage" => "usage",
+                                            "open-rules" => "rules",
+                                            _ => "home",
+                                        };
+                                        let _ = app_handle_inner.emit("island-open-view", view);
+                                        let _ = set_mode(&app_handle_inner, "expanded");
                                     }
                                     "sync" => {
                                         let h = app_handle_inner.clone();
@@ -1952,7 +2146,7 @@ pub fn run() {
                                         } else {
                                             emit_runtime_warning(
                                                 &app_handle_inner,
-                                                "ThatIsOK hooks installed.",
+                                                "Agent Gate hooks installed.",
                                             );
                                         }
                                     }

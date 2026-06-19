@@ -56,6 +56,15 @@ pub(crate) fn fetch_claude_snapshot(account_id: &str, label: &str) -> Option<Val
         "source": "local_auth",
         "plan": format!("{plan_str} plan"),
         "lines": lines,
+        "tokenUsage": {
+            "exactInput": token_usage.total_input,
+            "exactOutput": token_usage.total_output,
+            "exactTotal": token_usage.total_input + token_usage.total_output,
+            "estimatedInput": 0,
+            "estimatedOutput": 0,
+            "estimatedTotal": 0,
+            "source": "claude-jsonl"
+        },
         "meta": {
             "planType": plan_str,
             "todayMessages": today_stats.message_count,
@@ -196,6 +205,7 @@ fn read_claude_token_usage(claude_dir: &Path) -> TokenUsage {
     };
     let mut total_input = 0u64;
     let mut total_output = 0u64;
+    let today = today_date_str();
 
     for entry in entries.flatten().take(10) {
         let project_path = entry.path();
@@ -217,6 +227,9 @@ fn read_claude_token_usage(claude_dir: &Path) -> TokenUsage {
                 let Ok(entry) = serde_json::from_str::<Value>(line) else {
                     continue;
                 };
+                if !entry_is_today(&entry, &today) {
+                    continue;
+                }
                 let usage = entry
                     .get("usage")
                     .or_else(|| entry.get("token_usage"))
@@ -241,6 +254,37 @@ fn read_claude_token_usage(claude_dir: &Path) -> TokenUsage {
         total_input,
         total_output,
     }
+}
+
+fn entry_is_today(entry: &Value, today: &str) -> bool {
+    let timestamp = entry
+        .get("timestamp")
+        .or_else(|| entry.get("createdAt"))
+        .or_else(|| entry.get("created_at"))
+        .or_else(|| entry.get("ts"));
+
+    if let Some(value) = timestamp.and_then(Value::as_str) {
+        if value.starts_with(today) {
+            return true;
+        }
+        if let Ok(dt) = chrono::DateTime::parse_from_rfc3339(value) {
+            return dt.format("%Y-%m-%d").to_string() == today;
+        }
+    }
+
+    if let Some(value) = timestamp.and_then(Value::as_f64) {
+        let millis = if value > 1_000_000_000_000.0 {
+            value as i64
+        } else {
+            (value * 1000.0) as i64
+        };
+        let secs = millis / 1000;
+        if let Some(dt) = chrono::DateTime::from_timestamp(secs, 0) {
+            return dt.format("%Y-%m-%d").to_string() == today;
+        }
+    }
+
+    false
 }
 
 pub(crate) fn fetch_gemini_snapshot(account_id: &str, label: &str) -> Option<Value> {
@@ -328,6 +372,15 @@ pub(crate) fn fetch_gemini_snapshot(account_id: &str, label: &str) -> Option<Val
                 "input": today_stats.tokens_input,
                 "output": today_stats.tokens_output,
             }
+        },
+        "tokenUsage": {
+            "exactInput": today_stats.tokens_input,
+            "exactOutput": today_stats.tokens_output,
+            "exactTotal": today_stats.tokens_input + today_stats.tokens_output,
+            "estimatedInput": 0,
+            "estimatedOutput": 0,
+            "estimatedTotal": 0,
+            "source": "gemini-jsonl"
         },
         "lines": lines,
         "meta": {
