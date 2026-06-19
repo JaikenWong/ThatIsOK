@@ -20,8 +20,10 @@ const interventionPanel = document.getElementById('interventionPanel');
 const interventionSource = document.getElementById('interventionSource');
 const interventionTool = document.getElementById('interventionTool');
 const interventionTitle = document.getElementById('interventionTitle');
-const interventionCommand = document.getElementById('interventionCommand');
+const interventionExplanation = document.getElementById('interventionExplanation');
 const interventionDetail = document.getElementById('interventionDetail');
+const interventionThinking = document.getElementById('interventionThinking');
+const interventionCommand = document.getElementById('interventionCommand');
 const interventionMeta = document.getElementById('interventionMeta');
 const approveButton = document.getElementById('approveButton');
 const approveAlwaysButton = document.getElementById('approveAlwaysButton');
@@ -31,6 +33,8 @@ const runtimeWarning = document.getElementById('runtimeWarning');
 const approveShortcut = document.getElementById('approveShortcut');
 const alwaysShortcut = document.getElementById('alwaysShortcut');
 const denyShortcut = document.getElementById('denyShortcut');
+const jumpToTerminalButton = document.getElementById('jumpToTerminalButton');
+const interventionAskOptions = document.getElementById('interventionAskOptions');
 
 const PROVIDER_SETUP_TIPS = {
     codex: 'Requires Codex login. Run codex login, restart Codex, then Sync.',
@@ -60,6 +64,7 @@ let dragMoveFrame = null;
 let windowState = { mode: 'pill' };
 let runtimeWarningTimer = null;
 let settingsState = { syncIntervalMinutes: 10 };
+let updateReadyToRestart = false;
 const DRAG_THRESHOLD = 8;
 const SYNC_INTERVAL_STEPS = [5, 10, 15, 30, 60];
 const knownProviderOrder = ['claude', 'codex', 'cursor', 'deepseek', 'gemini', 'kiro', 'minimax', 'opencode'];
@@ -141,7 +146,8 @@ function createIpcRendererAdapter() {
         'intervention:respond': 'intervention_respond',
         'providers:get-visibility': 'providers_get_visibility',
         'settings:get': 'settings_get',
-        'settings:set-sync-interval': 'settings_set_sync_interval'
+        'settings:set-sync-interval': 'settings_set_sync_interval',
+        'island:jump-to-terminal': 'jump_to_terminal'
     };
 
     const sendMap = {
@@ -150,7 +156,7 @@ function createIpcRendererAdapter() {
         'island:drag-start': (mouse) => tauri.core.invoke('island_drag_start', { mouse }),
         'island:drag-move': (mouse) => tauri.core.invoke('island_drag_move', { mouse }),
         'island:drag-end': () => tauri.core.invoke('island_drag_end'),
-        'intervention:respond': (decision) => tauri.core.invoke('intervention_respond', { decision }),
+        'intervention:respond': (decision, answer = '') => tauri.core.invoke('intervention_respond', { decision, answer }),
         'providers:set-visibility': (provider, visible) => tauri.core.invoke('providers_set_visibility', { provider, visible }),
         'island:set-pill-width': (width) => tauri.core.invoke('island_set_pill_width', { width }),
         'app:restart': () => tauri.core.invoke('app_restart')
@@ -338,10 +344,25 @@ function getTone(data) {
 
     return 'tone-good';
 }
+const welcomeGuide = document.getElementById('welcomeGuide');
+const guideClose = document.getElementById('guideClose');
+
+guideClose.addEventListener('click', () => {
+    welcomeGuide.classList.add('hidden');
+    scheduleExpandedHeightSync();
+});
 
 function renderSummary(data) {
     currentData = data;
-    const visibleAccounts = getPrioritizedVisibleAccounts(data.accounts || []);
+    const accounts = data.accounts || [];
+    const visibleAccounts = getPrioritizedVisibleAccounts(accounts);
+
+    if (accounts.length === 0 && !pendingIntervention) {
+        welcomeGuide.classList.remove('hidden');
+    } else {
+        welcomeGuide.classList.add('hidden');
+    }
+
     const progressAccounts = visibleAccounts.filter(hasPillIndicator).slice(0, 5);
     const primaryAccount = visibleAccounts[0];
 
@@ -439,10 +460,9 @@ function getPillStatValue(account) {
     if (progressLine) {
         const limit = Number(progressLine.limit || 0);
         const used = Number(progressLine.used || 0);
+        const isRemaining = (progressLine.format || {}).mode === 'remaining';
         const percent = limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0;
-        const displayPercent = progressLine.format?.mode === 'remaining'
-            ? percent
-            : Math.max(0, Math.min(100, used));
+        const displayPercent = isRemaining ? percent : percent;
         return `${Math.round(displayPercent)}%`;
     }
 
@@ -704,14 +724,15 @@ function renderAccountLine(line) {
 function renderProgressLine(line) {
     const limit = Number(line.limit || 0);
     const used = Number(line.used || 0);
+    const isRemaining = (line.format || {}).mode === 'remaining';
     const percent = limit > 0 ? Math.max(0, Math.min(100, (used / limit) * 100)) : 0;
-    const resetText = line.resetsAt ? ` · reset ${formatResetDate(line.resetsAt)}` : '';
+    const resetText = line.resetsAt ? ` · ${formatResetDate(line.resetsAt)}` : '';
     
     let valueLabel = '';
     const format = line.format || { kind: 'currency', currency: 'USD' };
     
     if (format.kind === 'percent') {
-        valueLabel = `${Math.round(format.mode === 'remaining' ? percent : used)}%`;
+        valueLabel = `${Math.round(isRemaining ? percent : used)}%`;
     } else if (format.kind === 'count') {
         valueLabel = `${used}${format.suffix ? ` ${format.suffix}` : ''}`;
     } else {
@@ -740,7 +761,7 @@ function renderProgressLine(line) {
 }
 
 function renderSessions(sessions) {
-    const meaningful = sessions.filter(s => s.status);
+    const meaningful = sessions.filter(s => s.jumpTarget);
     if (!meaningful.length) {
         sessionsList.classList.add('hidden');
         sessionsList.innerHTML = '';
@@ -748,12 +769,28 @@ function renderSessions(sessions) {
     }
 
     sessionsList.classList.remove('hidden');
-    sessionsList.innerHTML = meaningful.slice(0, 2).map((session) => `
+    sessionsList.innerHTML = `
+        <div class="sessionsLabel">Activity</div>
+        ${meaningful.slice(0, 2).map((session) => `
         <div class="sessionRow">
             <span class="sessionName">${formatSource(session.source)}</span>
-            <span class="sessionValue">${session.status || '--'}</span>
+            <span class="sessionValue">Working</span>
+            <button class="sessionJump" data-target='${escapeHtml(JSON.stringify(session.jumpTarget))}' type="button">Jump</button>
         </div>
-    `).join('');
+        `).join('')}
+    `;
+
+    sessionsList.querySelectorAll('.sessionJump').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                const target = JSON.parse(btn.dataset.target);
+                await ipcRenderer.invoke('island:jump-to-terminal', { target });
+            } catch (err) {
+                console.error('Session jump failed', err);
+            }
+        });
+    });
 }
 
 function renderIntervention(intervention) {
@@ -762,6 +799,8 @@ function renderIntervention(intervention) {
 
     if (!intervention) {
         interventionPanel.classList.add('hidden');
+        interventionAskOptions.classList.add('hidden');
+        jumpToTerminalButton.classList.add('hidden');
         updateCompactVisibility();
         scheduleExpandedHeightSync();
         if (currentData) {
@@ -778,15 +817,59 @@ function renderIntervention(intervention) {
     interventionSource.innerText = formatSource(intervention.source);
     interventionTool.innerText = formatTool(intervention.toolName);
     interventionTitle.innerText = intervention.title || 'Approval required';
+    interventionExplanation.innerText = intervention.explanation || '';
+    interventionExplanation.classList.toggle('hidden', !intervention.explanation || intervention.explanation === intervention.detail);
+    interventionThinking.textContent = intervention.thinking || '';
+    interventionThinking.classList.toggle('hidden', !intervention.thinking);
     renderInterventionCommand(intervention.command || intervention.filePath);
     interventionDetail.innerText = renderDetailText(intervention);
     renderInterventionMeta(intervention);
+
+    if (intervention.event === 'QuestionAsked' || intervention.toolName === 'AskUserQuestion') {
+        interventionAskOptions.classList.remove('hidden');
+        const options = extractAskOptions(intervention);
+        interventionAskOptions.innerHTML = options.length > 0
+            ? options.map((opt, i) => `<button class="btn askOption" data-index="${i}">${escapeHtml(opt)}</button>`).join('')
+            : '';
+        interventionAskOptions.querySelectorAll('.askOption').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.index, 10);
+                sendInterventionDecision('approve', options[idx] || '');
+            });
+        });
+        approveButton.innerText = 'Answer';
+        approveAlwaysButton.classList.add('hidden');
+    } else {
+        interventionAskOptions.classList.add('hidden');
+        approveButton.innerText = 'Approve';
+        approveAlwaysButton.classList.remove('hidden');
+    }
+
+    if (intervention.jumpTarget) {
+        jumpToTerminalButton.classList.remove('hidden');
+    } else {
+        jumpToTerminalButton.classList.add('hidden');
+    }
+
     updateCompactVisibility();
     applySourceTheme(intervention.source);
     island.classList.remove('tone-neutral', 'tone-good', 'tone-warn', 'tone-danger');
     island.classList.add('tone-danger');
     expandIsland();
     scheduleExpandedHeightSync();
+}
+
+function extractAskOptions(intervention) {
+    const raw = intervention.raw || '';
+    try {
+        const payload = JSON.parse(raw);
+        const question = payload.tool_input?.questions?.[0] || payload.toolInput?.questions?.[0] || payload.questions?.[0];
+        const options = question?.options || payload.options || payload.choices || [];
+        if (Array.isArray(options)) {
+            return options.map(o => typeof o === 'string' ? o : (o.label || o.text || String(o)));
+        }
+    } catch (_) {}
+    return [];
 }
 
 function formatSource(source) {
@@ -853,15 +936,15 @@ function renderDetailText(intervention) {
         return '--';
     }
 
-    if (intervention.reason) {
-        return compactText(intervention.reason, 180);
+    if (intervention.explanation && intervention.detail && intervention.explanation !== intervention.detail) {
+        return compactText(intervention.detail, 200);
     }
 
     if (intervention.command && intervention.detail === intervention.command) {
         return `${formatSource(intervention.source)} requested action`;
     }
 
-    return compactText(intervention.detail || '--', 180);
+    return compactText(intervention.detail || '--', 200);
 }
 
 function compactText(value, maxLength) {
@@ -895,8 +978,21 @@ function formatResetDate(value) {
     if (Number.isNaN(date.getTime())) {
         return '--';
     }
-
-    return `${date.getMonth() + 1}/${date.getDate()}`;
+    const diffMs = date.getTime() - Date.now();
+    if (diffMs <= 0) {
+        return 'now';
+    }
+    const totalMin = Math.floor(diffMs / 60000);
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    if (h > 0) {
+        return m > 0 ? `${h}h ${m}m` : `${h}h`;
+    }
+    if (m > 0) {
+        return `${m}m`;
+    }
+    const sec = Math.floor(diffMs / 1000);
+    return `${sec}s`;
 }
 
 function updateCompactVisibility() {
@@ -1028,12 +1124,45 @@ ipcRenderer.on('runtime-warning', (_event, warning) => {
     renderRuntimeWarning(warning);
 });
 
+ipcRenderer.on('hook-event', (_event, payload) => {
+    if (currentData && payload.summary) {
+        const sessions = currentData.sessions || [];
+        const existingIdx = sessions.findIndex(s => s.id === payload.sessionID);
+        if (existingIdx >= 0) {
+            sessions[existingIdx].status = payload.summary;
+        }
+        renderSessions(currentData.sessions || []);
+    }
+});
+
 ipcRenderer.on('island-window-state', (_event, nextState) => {
     windowState = nextState || windowState;
 });
 
+const checkUpdateButton = document.getElementById('checkUpdateButton');
+
+checkUpdateButton.addEventListener('click', async () => {
+    if (updateReadyToRestart) {
+        ipcRenderer.send('app:restart');
+        return;
+    }
+    checkUpdateButton.disabled = true;
+    checkUpdateButton.innerText = 'Checking...';
+    try {
+        await checkForUpdates();
+    } catch (error) {
+        console.error('Update check failed', error);
+        renderRuntimeWarning('Update check failed');
+        checkUpdateButton.disabled = false;
+        checkUpdateButton.innerText = 'Check Updates';
+    }
+});
+
 syncButton.addEventListener('click', async () => {
     syncButton.disabled = true;
+    syncButton.classList.add('loading');
+    const originalText = syncButton.innerText;
+    syncButton.innerText = 'Syncing...';
     try {
         const data = await ipcRenderer.invoke('island:sync-now');
         renderSummary(data);
@@ -1042,6 +1171,8 @@ syncButton.addEventListener('click', async () => {
         renderRuntimeWarning('Sync failed. Try again in a moment.');
     } finally {
         syncButton.disabled = false;
+        syncButton.classList.remove('loading');
+        syncButton.innerText = originalText;
     }
 });
 
@@ -1057,21 +1188,23 @@ bindInterventionButton(approveButton, 'approve');
 bindInterventionButton(approveAlwaysButton, 'approve_always');
 bindInterventionButton(denyButton, 'deny');
 
+jumpToTerminalButton.addEventListener('click', async (event) => {
+    event.preventDefault();
+    event.stopPropagation();
+    if (!pendingIntervention || !pendingIntervention.jumpTarget) return;
+    try {
+        await ipcRenderer.invoke('island:jump-to-terminal', { target: pendingIntervention.jumpTarget });
+    } catch (err) {
+        console.error('Jump failed', err);
+    }
+});
+
 function bindInterventionButton(button, decision) {
-    let pointerHandledAt = 0;
-    const handler = (event) => {
+    button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
-        if (event.type === 'click' && Date.now() - pointerHandledAt < 350) {
-            return;
-        }
-        if (event.type === 'pointerup') {
-            pointerHandledAt = Date.now();
-        }
         sendInterventionDecision(decision);
-    };
-    button.addEventListener('pointerup', handler);
-    button.addEventListener('click', handler);
+    });
 }
 
 window.addEventListener('keydown', (event) => {
@@ -1098,7 +1231,7 @@ window.addEventListener('keydown', (event) => {
     }
 });
 
-async function sendInterventionDecision(decision) {
+async function sendInterventionDecision(decision, answer = '') {
     if (!pendingIntervention) {
         return;
     }
@@ -1113,7 +1246,7 @@ async function sendInterventionDecision(decision) {
     approveAlwaysButton.disabled = true;
     denyButton.disabled = true;
     try {
-        const ok = await ipcRenderer.invoke('intervention:respond', decision);
+        const ok = await ipcRenderer.invoke('intervention:respond', { decision, answer });
         if (!ok) {
             respondingInterventionId = null;
             approveButton.disabled = false;
@@ -1342,7 +1475,7 @@ function showUpdateBanner(status, message) {
             el.textContent = 'Checking for updates...';
             break;
         case 'available':
-            el.textContent = `v${escapeHtml(message)} available. Click ThatISOK in tray to update.`;
+            el.textContent = `v${escapeHtml(message)} available.`;
             break;
         case 'downloading':
             el.textContent = `Downloading v${escapeHtml(message)}...`;
@@ -1366,7 +1499,49 @@ function showUpdateBanner(status, message) {
 
 ipcRenderer.on('update-status', (_, payload) => {
     showUpdateBanner(payload.status, payload.version || payload.message || '');
+    if (payload.status === 'available') {
+        checkUpdateButton.innerText = 'Download';
+        checkUpdateButton.disabled = false;
+    } else if (payload.status === 'up-to-date' || payload.status === 'error') {
+        checkUpdateButton.innerText = 'Check Updates';
+        checkUpdateButton.disabled = false;
+    } else if (payload.status === 'downloading') {
+        updateReadyToRestart = false;
+        checkUpdateButton.innerText = 'Downloading...';
+        checkUpdateButton.disabled = true;
+    } else if (payload.status === 'installed') {
+        updateReadyToRestart = true;
+        checkUpdateButton.innerText = 'Restart';
+        checkUpdateButton.disabled = false;
+    }
 });
+
+async function checkForUpdates() {
+    showUpdateBanner('checking', '');
+    const tauri = window.__TAURI__;
+    if (!tauri || !tauri.updater || !tauri.updater.check) {
+        throw new Error('Updater API unavailable');
+    }
+
+    const update = await tauri.updater.check();
+    if (!update) {
+        updateReadyToRestart = false;
+        showUpdateBanner('up-to-date', '');
+        checkUpdateButton.innerText = 'Check Updates';
+        checkUpdateButton.disabled = false;
+        return;
+    }
+
+    const version = update.version || '';
+    showUpdateBanner('downloading', version);
+    checkUpdateButton.innerText = 'Downloading...';
+    checkUpdateButton.disabled = true;
+    await update.downloadAndInstall();
+    updateReadyToRestart = true;
+    showUpdateBanner('installed', version);
+    checkUpdateButton.innerText = 'Restart';
+    checkUpdateButton.disabled = false;
+}
 
 function loadVersion() {
     try {

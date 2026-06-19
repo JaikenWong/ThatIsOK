@@ -8,6 +8,7 @@
     "core:window:default",
     "core:event:default",
     "core:tray:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "updater:default"
   ]
 }

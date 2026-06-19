@@ -38,7 +38,11 @@ pub(crate) fn fetch_claude_snapshot(account_id: &str, label: &str) -> Option<Val
         }));
     }
 
-    let plan_str = if plan_type.is_empty() { "unknown" } else { &plan_type };
+    let plan_str = if plan_type.is_empty() {
+        "unknown"
+    } else {
+        &plan_type
+    };
 
     Some(json!({
         "accountId": account_id,
@@ -78,10 +82,18 @@ struct TokenUsage {
 fn read_claude_today_stats(claude_dir: &Path) -> ClaudeTodayStats {
     let stats_path = claude_dir.join("stats-cache.json");
     let Ok(content) = fs::read_to_string(&stats_path) else {
-        return ClaudeTodayStats { message_count: 0, session_count: 0, tool_call_count: 0 };
+        return ClaudeTodayStats {
+            message_count: 0,
+            session_count: 0,
+            tool_call_count: 0,
+        };
     };
     let Ok(stats) = serde_json::from_str::<Value>(&content) else {
-        return ClaudeTodayStats { message_count: 0, session_count: 0, tool_call_count: 0 };
+        return ClaudeTodayStats {
+            message_count: 0,
+            session_count: 0,
+            tool_call_count: 0,
+        };
     };
 
     let daily = stats
@@ -170,11 +182,17 @@ fn read_claude_plan_type(claude_dir: &Path) -> String {
 fn read_claude_token_usage(claude_dir: &Path) -> TokenUsage {
     let projects_dir = claude_dir.join("projects");
     if !projects_dir.exists() {
-        return TokenUsage { total_input: 0, total_output: 0 };
+        return TokenUsage {
+            total_input: 0,
+            total_output: 0,
+        };
     }
 
     let Ok(entries) = fs::read_dir(&projects_dir) else {
-        return TokenUsage { total_input: 0, total_output: 0 };
+        return TokenUsage {
+            total_input: 0,
+            total_output: 0,
+        };
     };
     let mut total_input = 0u64;
     let mut total_output = 0u64;
@@ -219,7 +237,10 @@ fn read_claude_token_usage(claude_dir: &Path) -> TokenUsage {
         }
     }
 
-    TokenUsage { total_input, total_output }
+    TokenUsage {
+        total_input,
+        total_output,
+    }
 }
 
 pub(crate) fn fetch_gemini_snapshot(account_id: &str, label: &str) -> Option<Value> {
@@ -259,7 +280,11 @@ pub(crate) fn fetch_gemini_snapshot(account_id: &str, label: &str) -> Option<Val
         0.0
     };
 
-    let plan_name = if daily_limit >= 1000 { "Gemini Code Assist" } else { "Gemini CLI" };
+    let plan_name = if daily_limit >= 1000 {
+        "Gemini Code Assist"
+    } else {
+        "Gemini CLI"
+    };
 
     let mut lines = Vec::new();
     if daily_limit > 0 {
@@ -357,7 +382,9 @@ fn read_gemini_today_stats(gemini_dir: &Path) -> GeminiTodayStats {
     };
 
     let today = today_date_str();
-    let Ok(projects) = fs::read_dir(&tmp_dir) else { return stats };
+    let Ok(projects) = fs::read_dir(&tmp_dir) else {
+        return stats;
+    };
 
     for project in projects.flatten() {
         let project_path = project.path();
@@ -368,13 +395,17 @@ fn read_gemini_today_stats(gemini_dir: &Path) -> GeminiTodayStats {
         if !chats_path.exists() {
             continue;
         }
-        let Ok(files) = fs::read_dir(&chats_path) else { continue };
+        let Ok(files) = fs::read_dir(&chats_path) else {
+            continue;
+        };
         for file in files.flatten() {
             let fp = file.path();
             if fp.extension().and_then(|e| e.to_str()) != Some("jsonl") {
                 continue;
             }
-            let Ok(content) = fs::read_to_string(&fp) else { continue };
+            let Ok(content) = fs::read_to_string(&fp) else {
+                continue;
+            };
             let mut is_today = false;
             let mut msg_count: u32 = 0;
             let mut model_reqs: u32 = 0;
@@ -419,8 +450,12 @@ fn read_gemini_today_stats(gemini_dir: &Path) -> GeminiTodayStats {
                     }
                 }
                 if let Some(tokens) = entry.get("tokens") {
-                    stats.tokens_input += tokens.get("input").and_then(Value::as_u64).unwrap_or(0);
-                    stats.tokens_output += tokens.get("output").and_then(Value::as_u64).unwrap_or(0);
+                    if is_today {
+                        stats.tokens_input +=
+                            tokens.get("input").and_then(Value::as_u64).unwrap_or(0);
+                        stats.tokens_output +=
+                            tokens.get("output").and_then(Value::as_u64).unwrap_or(0);
+                    }
                 }
             }
 
@@ -467,26 +502,26 @@ pub(crate) fn fetch_kiro_snapshot(account_id: &str, label: &str) -> Option<Value
     let mut stmt = conn
         .prepare("SELECT value FROM ItemTable WHERE key = 'kiro.kiroAgent' LIMIT 1")
         .ok()?;
-    let raw: Option<String> = stmt
-        .query_row([], |row| row.get(0))
-        .ok();
+    let raw: Option<String> = stmt.query_row([], |row| row.get(0)).ok();
     drop(stmt);
     drop(conn);
 
     let raw = raw?;
     let state: Value = serde_json::from_str(&raw).ok()?;
-    let usage_state = state
-        .get("kiro.resourceNotifications.usageState")?;
+    let usage_state = state.get("kiro.resourceNotifications.usageState")?;
     let breakdowns = usage_state
         .get("usageBreakdowns")
         .and_then(Value::as_array)?;
 
-    let primary = breakdowns.iter().find(|b| {
-        b.get("type")
-            .or_else(|| b.get("resourceType"))
-            .and_then(Value::as_str)
-            == Some("CREDIT")
-    }).or_else(|| breakdowns.first())?;
+    let primary = breakdowns
+        .iter()
+        .find(|b| {
+            b.get("type")
+                .or_else(|| b.get("resourceType"))
+                .and_then(Value::as_str)
+                == Some("CREDIT")
+        })
+        .or_else(|| breakdowns.first())?;
 
     let used = primary
         .get("currentUsageWithPrecision")
@@ -524,7 +559,9 @@ pub(crate) fn fetch_kiro_snapshot(account_id: &str, label: &str) -> Option<Value
     }
     lines.push(progress);
 
-    let bonus = primary.get("freeTrialInfo").or_else(|| primary.get("freeTrialUsage"));
+    let bonus = primary
+        .get("freeTrialInfo")
+        .or_else(|| primary.get("freeTrialUsage"));
     if let Some(b) = bonus {
         let b_used = b
             .get("currentUsageWithPrecision")
@@ -549,7 +586,10 @@ pub(crate) fn fetch_kiro_snapshot(account_id: &str, label: &str) -> Option<Value
         }
     }
 
-    let timestamp = usage_state.get("timestamp").and_then(Value::as_i64).unwrap_or(0);
+    let timestamp = usage_state
+        .get("timestamp")
+        .and_then(Value::as_i64)
+        .unwrap_or(0);
     let plan = state
         .get("subscriptionInfo")
         .and_then(|s| s.get("subscriptionTitle"))

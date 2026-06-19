@@ -1,9 +1,9 @@
 use base64::Engine;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::{epoch_to_ms, iso_from_ms, now_millis, read_number_value};
+use crate::{epoch_to_ms, iso_from_ms, now_millis, read_env_value, read_number_value};
 
 pub(crate) async fn fetch_codex_snapshot(
     client: &reqwest::Client,
@@ -11,7 +11,10 @@ pub(crate) async fn fetch_codex_snapshot(
     label: &str,
 ) -> Option<Value> {
     let home = dirs::home_dir()?;
-    let auth_path = home.join(".codex").join("auth.json");
+    let codex_home = read_env_value(&["CODEX_HOME"])
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".codex"));
+    let auth_path = codex_home.join("auth.json");
     if !auth_path.exists() {
         return None;
     }
@@ -69,14 +72,22 @@ pub(crate) async fn fetch_codex_snapshot(
     }
 
     if usage_data.is_none() {
-        usage_data = read_codex_session_usage(&home);
+        usage_data = read_codex_session_usage(&codex_home);
     }
 
     let effective_stale = is_stale && usage_data.is_none();
     let lines = build_codex_lines(usage_data.as_ref());
     let message = usage_error.unwrap_or_else(|| format!("plan {display_plan}"));
-    let status = if effective_stale { "stale" } else { "live-local" };
-    let plan = if effective_stale { "Codex auth stale" } else { &display_plan };
+    let status = if effective_stale {
+        "stale"
+    } else {
+        "live-local"
+    };
+    let plan = if effective_stale {
+        "Codex auth stale"
+    } else {
+        &display_plan
+    };
     let source = usage_data
         .as_ref()
         .and_then(|d| d.get("source"))
@@ -128,24 +139,37 @@ async fn fetch_codex_usage_api(
     let headers = response.headers().clone();
     let mut data: Value = response.json().await.map_err(|e| e.to_string())?;
     if let Some(obj) = data.as_object_mut() {
-        obj.insert("source".to_string(), Value::String("provider_api".to_string()));
-        if let Some(val) = headers.get("x-codex-primary-used-percent").and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<f64>().ok()) {
+        obj.insert(
+            "source".to_string(),
+            Value::String("provider_api".to_string()),
+        );
+        if let Some(val) = headers
+            .get("x-codex-primary-used-percent")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<f64>().ok())
+        {
             obj.insert("header_primary_used_pct".to_string(), json!(val));
         }
-        if let Some(val) = headers.get("x-codex-secondary-used-percent").and_then(|v| v.to_str().ok()).and_then(|s| s.parse::<f64>().ok()) {
+        if let Some(val) = headers
+            .get("x-codex-secondary-used-percent")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.parse::<f64>().ok())
+        {
             obj.insert("header_secondary_used_pct".to_string(), json!(val));
         }
     }
     Ok(data)
 }
 
-fn read_codex_session_usage(home: &Path) -> Option<Value> {
-    let sessions_dir = home.join(".codex").join("sessions");
+fn read_codex_session_usage(codex_home: &Path) -> Option<Value> {
+    let sessions_dir = codex_home.join("sessions");
     if !sessions_dir.exists() {
         return None;
     }
     let latest = find_latest_rate_limit_event(&sessions_dir)?;
-    let limits = latest.get("rateLimits").or_else(|| latest.get("rate_limits"))?;
+    let limits = latest
+        .get("rateLimits")
+        .or_else(|| latest.get("rate_limits"))?;
 
     let primary = limits.get("primary").and_then(|p| {
         Some::<Value>(json!({
@@ -281,9 +305,7 @@ fn decode_codex_jwt(token: &str) -> (String, Option<String>) {
     let Ok(data): Result<Value, _> = serde_json::from_slice(&decoded) else {
         return (String::new(), None);
     };
-    let auth = data
-        .get("https://api.openai.com/auth")
-        .or_else(|| data.get("https://api.openai.com/auth"));
+    let auth = data.get("https://api.openai.com/auth");
     let plan = auth
         .and_then(|a| a.get("chatgpt_plan_type"))
         .or_else(|| data.get("chatgpt_plan_type"))
@@ -321,8 +343,12 @@ fn build_codex_lines(usage: Option<&Value>) -> Vec<Value> {
     };
     let mut lines = Vec::new();
 
-    let header_primary = data.get("header_primary_used_pct").and_then(read_number_value);
-    let header_secondary = data.get("header_secondary_used_pct").and_then(read_number_value);
+    let header_primary = data
+        .get("header_primary_used_pct")
+        .and_then(read_number_value);
+    let header_secondary = data
+        .get("header_secondary_used_pct")
+        .and_then(read_number_value);
 
     if let Some(pct) = header_primary {
         let remaining = (100.0 - pct).max(0.0);

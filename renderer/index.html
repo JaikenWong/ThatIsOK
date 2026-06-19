@@ -22,15 +22,39 @@
                 <div id="pillProgress" class="pillProgressGroup hidden"></div>
             </div>
             <div id="expandedContent" class="hidden">
+                <div id="welcomeGuide" class="welcomeGuide hidden">
+                    <div class="welcomeHeader">Welcome to ThatIsOK</div>
+                    <div class="welcomeText">Monitor your AI usage and approve tool calls from one place.</div>
+                    <div class="guideSteps">
+                        <div class="guideStep">
+                            <span class="stepIcon">🔑</span>
+                            <div class="stepText">
+                                <strong>Setup Providers</strong>
+                                <span>Enable providers in the panel below and click Sync.</span>
+                            </div>
+                        </div>
+                        <div class="guideStep">
+                            <span class="stepIcon">🛡️</span>
+                            <div class="stepText">
+                                <strong>Approve Hooks</strong>
+                                <span>Get alerts when agents want to run commands or edit files.</span>
+                            </div>
+                        </div>
+                    </div>
+                    <button id="guideClose" class="btn approve" style="margin-top: 8px;">Got it</button>
+                </div>
                 <div id="interventionPanel" class="intervention hidden">
                     <div class="interventionHeader">
                         <span id="interventionSource" class="sourceBadge">Claude</span>
                         <span id="interventionTool" class="toolBadge">permission</span>
                     </div>
                     <div id="interventionTitle" class="interventionTitle">Approval required</div>
+                    <div id="interventionExplanation" class="interventionDetail hidden"></div>
                     <div id="interventionDetail" class="interventionDetail"></div>
+                    <pre id="interventionThinking" class="interventionCommand hidden" style="opacity:0.6;font-size:10px;"></pre>
                     <pre id="interventionCommand" class="interventionCommand hidden"></pre>
                     <div id="interventionMeta" class="interventionMeta hidden"></div>
+                    <div id="interventionAskOptions" class="askOptions hidden"></div>
                     <div class="interventionHint">
                         <span id="approveShortcut" class="hintKey">Ctrl Alt A</span> Approve
                         <span class="hintSep">|</span>
@@ -42,6 +66,7 @@
                         <button id="approveButton" class="btn approve" type="button">Approve</button>
                         <button id="approveAlwaysButton" class="btn approveAlways" type="button">Always</button>
                         <button id="denyButton" class="btn deny" type="button">Deny</button>
+                        <button id="jumpToTerminalButton" class="btn jump hidden" type="button">Jump</button>
                     </div>
                 </div>
                 <div class="topStack">
@@ -55,6 +80,10 @@
                             <span id="syncIntervalValue" class="settingsValue">10m</span>
                             <button id="syncIntervalUp" class="stepperButton" type="button">+</button>
                         </div>
+                    </div>
+                    <div class="settingsRow">
+                        <span class="settingsLabel">Version <span id="appVersion">--</span></span>
+                        <button id="checkUpdateButton" class="btn sync" style="padding: 2px 8px; font-size: 9px; flex: 0 0 auto;">Check Updates</button>
                     </div>
                 </div>
                 <div id="settingsMeta" class="runtimeWarning hidden"></div>

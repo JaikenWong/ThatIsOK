@@ -52,6 +52,7 @@
     "windows": {
       "nsis": {
         "installerIcon": "icons/icon.ico",
+        "installerHooks": "windows/hooks-cleanup.nsh",
         "installMode": "currentUser",
         "displayLanguageSelector": false
       }

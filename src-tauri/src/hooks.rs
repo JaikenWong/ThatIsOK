@@ -11,11 +11,18 @@ use tokio::sync::oneshot;
 
 use crate::{
     build_intervention, is_managed_command, is_persistently_allowed, now_millis,
-    pending_intervention_json, AppState, SessionInfo, HOOK_EVENTS, MANAGED_KEY,
+    pending_intervention_json, refresh_opencode_local_usage, AppState, PendingIntervention,
+    SessionInfo, ALL_HOOK_EVENTS, CLAUDE_HOOK_EVENTS, CODEX_HOOK_EVENTS, MANAGED_KEY,
 };
 
 pub fn run_hook_bridge_from_args() -> bool {
     let args = env::args().collect::<Vec<_>>();
+    if args.iter().any(|arg| arg == "--uninstall-hooks") {
+        if let Err(error) = remove_agent_hooks() {
+            eprintln!("failed to remove hooks: {error}");
+        }
+        return true;
+    }
     if !args.iter().any(|arg| arg == "--hook-source") {
         return false;
     }
@@ -107,6 +114,30 @@ pub(crate) fn inject_agent_hooks(app: &AppHandle) {
     }
 }
 
+pub(crate) fn remove_agent_hooks() -> Result<(), String> {
+    let Some(home) = dirs::home_dir() else {
+        return Err("home directory not available".to_string());
+    };
+
+    let mut errors = Vec::new();
+    if let Err(error) = remove_managed_hooks_from_file(&home.join(".codex").join("hooks.json")) {
+        errors.push(format!("Codex: {error}"));
+    }
+    if let Err(error) = remove_managed_hooks_from_file(&home.join(".claude").join("settings.json"))
+    {
+        errors.push(format!("Claude: {error}"));
+    }
+    if let Err(error) = remove_opencode_plugin(&home) {
+        errors.push(format!("OpenCode: {error}"));
+    }
+
+    if errors.is_empty() {
+        Ok(())
+    } else {
+        Err(errors.join("; "))
+    }
+}
+
 pub(crate) async fn start_hook_server(app: AppHandle) {
     let listener = match TcpListener::bind(("127.0.0.1", 45873)).await {
         Ok(listener) => listener,
@@ -133,6 +164,63 @@ pub(crate) async fn start_hook_server(app: AppHandle) {
     }
 }
 
+fn remove_managed_hooks_from_file(path: &Path) -> Result<(), String> {
+    let Ok(content) = fs::read_to_string(path) else {
+        return Ok(());
+    };
+    let mut config = serde_json::from_str::<Value>(&content).map_err(|err| err.to_string())?;
+    let Some(hooks) = config.get_mut("hooks").and_then(Value::as_object_mut) else {
+        return Ok(());
+    };
+
+    let events = hooks.keys().cloned().collect::<Vec<_>>();
+    for event_name in events {
+        let next = hooks
+            .get(&event_name)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|entry| !is_managed_hook_value(entry))
+            .collect::<Vec<_>>();
+        if next.is_empty() {
+            hooks.remove(&event_name);
+        } else {
+            hooks.insert(event_name, Value::Array(next));
+        }
+    }
+
+    let content = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
+    fs::write(path, format!("{content}\n")).map_err(|err| err.to_string())
+}
+
+fn remove_opencode_plugin(home: &Path) -> Result<(), String> {
+    let plugin_path = home
+        .join(".config")
+        .join("opencode")
+        .join("plugins")
+        .join("thatisok.js");
+    if plugin_path.exists() {
+        fs::remove_file(&plugin_path).map_err(|err| err.to_string())?;
+    }
+
+    let config_path = home.join(".config").join("opencode").join("config.json");
+    let Ok(content) = fs::read_to_string(&config_path) else {
+        return Ok(());
+    };
+    let mut config = serde_json::from_str::<Value>(&content).map_err(|err| err.to_string())?;
+    let Some(plugins) = config.get_mut("plugin").and_then(Value::as_array_mut) else {
+        return Ok(());
+    };
+    plugins.retain(|item| {
+        item.as_str()
+            .map(|value| !value.contains("thatisok.js") && !value.contains("ThatIsOK"))
+            .unwrap_or(true)
+    });
+    let content = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
+    fs::write(config_path, format!("{content}\n")).map_err(|err| err.to_string())
+}
+
 fn get_cli_arg(args: &[String], name: &str) -> Option<String> {
     args.windows(2)
         .find(|items| items.first().is_some_and(|item| item == name))
@@ -150,14 +238,19 @@ fn run_hook_bridge(source: &str, event_name: &str, input: &str) -> Result<(), St
             "payload": serde_json::from_str::<Value>(input).ok()
         }
     });
-    let addr: std::net::SocketAddr = "127.0.0.1:45873".parse().map_err(|e: std::net::AddrParseError| e.to_string())?;
-    let mut stream =
-        std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3))
-            .map_err(|err| err.to_string())?;
+    let addr: std::net::SocketAddr = "127.0.0.1:45873"
+        .parse()
+        .map_err(|e: std::net::AddrParseError| e.to_string())?;
+    let mut stream = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3))
+        .map_err(|err| err.to_string())?;
     stream
         .write_all(format!("{payload}\n").as_bytes())
         .map_err(|err| err.to_string())?;
-    let read_timeout = if event_name.eq_ignore_ascii_case("PermissionRequest") { 1800 } else { 5 };
+    let read_timeout = if event_name.eq_ignore_ascii_case("PermissionRequest") {
+        1_800
+    } else {
+        5
+    };
     stream
         .set_read_timeout(Some(std::time::Duration::from_secs(read_timeout)))
         .map_err(|err| err.to_string())?;
@@ -166,13 +259,17 @@ fn run_hook_bridge(source: &str, event_name: &str, input: &str) -> Result<(), St
     reader.read_line(&mut line).map_err(|err| err.to_string())?;
     let response = serde_json::from_str::<Value>(&line).map_err(|err| err.to_string())?;
     if event_name.eq_ignore_ascii_case("PermissionRequest") {
-        write_permission_output(&response)?;
+        write_permission_output(source, &response)?;
     }
     Ok(())
 }
 
-fn write_permission_output(response: &Value) -> Result<(), String> {
+fn write_permission_output(source: &str, response: &Value) -> Result<(), String> {
     if response.get("requiresDecision").and_then(Value::as_bool) != Some(true) {
+        return Ok(());
+    }
+    if response.get("isQuestion").and_then(Value::as_bool) == Some(true) {
+        write_question_output(source, response)?;
         return Ok(());
     }
     let approved = response
@@ -189,13 +286,67 @@ fn write_permission_output(response: &Value) -> Result<(), String> {
             "message".to_string(),
             Value::String("Denied from ThatIsOK".to_string()),
         );
+        decision.insert("interrupt".to_string(), Value::Bool(false));
     }
-    let output = json!({
+    let mut output = json!({
+        "continue": true,
         "hookSpecificOutput": {
             "hookEventName": "PermissionRequest",
             "decision": Value::Object(decision)
         }
     });
+    if source == "claude" {
+        output["suppressOutput"] = Value::Bool(true);
+    }
+    println!(
+        "{}",
+        serde_json::to_string(&output).map_err(|err| err.to_string())?
+    );
+    Ok(())
+}
+
+fn write_question_output(source: &str, response: &Value) -> Result<(), String> {
+    let answer = response
+        .get("answer")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .trim();
+
+    let output = if source == "opencode" {
+        json!({
+            "type": "answer",
+            "text": answer
+        })
+    } else {
+        let question = response
+            .get("question")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or("answer");
+        let mut decision = serde_json::Map::new();
+        decision.insert("behavior".to_string(), Value::String("allow".to_string()));
+        let mut hook_specific_output = json!({
+            "hookEventName": "PermissionRequest",
+            "decision": Value::Object(decision),
+            "answer": answer
+        });
+        if !answer.is_empty() {
+            hook_specific_output["updatedInput"] = json!({
+                "answers": {
+                    question: answer
+                }
+            });
+        }
+        let mut output = json!({
+            "continue": true,
+            "hookSpecificOutput": hook_specific_output
+        });
+        if source == "claude" {
+            output["suppressOutput"] = Value::Bool(true);
+        }
+        output
+    };
+
     println!(
         "{}",
         serde_json::to_string(&output).map_err(|err| err.to_string())?
@@ -215,7 +366,7 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
     if !config.get("hooks").is_some_and(Value::is_object) {
         config["hooks"] = json!({});
     }
-    for event_name in HOOK_EVENTS {
+    for event_name in ALL_HOOK_EVENTS {
         let existing = config["hooks"]
             .get(*event_name)
             .and_then(Value::as_array)
@@ -225,10 +376,25 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
             .into_iter()
             .filter(|entry| !is_managed_hook_value(entry))
             .collect::<Vec<_>>();
-        let mut next_entries = filtered;
-        let timeout = if *event_name == "PreToolUse" || *event_name == "PermissionRequest" { 86400 } else { 10000 };
+        config["hooks"][*event_name] = Value::Array(filtered);
+    }
+    for event_name in CODEX_HOOK_EVENTS {
+        let mut next_entries = config["hooks"]
+            .get(*event_name)
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default();
+        let timeout = if *event_name == "PermissionRequest" {
+            3_600
+        } else {
+            45
+        };
         let command = build_tauri_hook_command(exe_path, "codex", event_name);
-        let matcher_needed = !matches!(event_name, &"UserPromptSubmit" | &"Stop");
+        let matcher = match *event_name {
+            "SessionStart" => Some("startup|resume"),
+            "UserPromptSubmit" | "PermissionRequest" | "Stop" => None,
+            _ => Some("*"),
+        };
         let mut entry = json!({
             "hooks": [{
                 "type": "command",
@@ -237,8 +403,8 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
             }],
             "_managedBy": MANAGED_KEY
         });
-        if matcher_needed {
-            entry["matcher"] = Value::String("*".to_string());
+        if let Some(matcher) = matcher {
+            entry["matcher"] = Value::String(matcher.to_string());
         }
         next_entries.push(entry);
         config["hooks"][*event_name] = Value::Array(next_entries);
@@ -265,7 +431,7 @@ fn inject_claude_hooks(exe_path: &Path) -> Result<(), String> {
     if !config.get("hooks").is_some_and(Value::is_object) {
         config["hooks"] = json!({});
     }
-    for event_name in HOOK_EVENTS {
+    for event_name in CLAUDE_HOOK_EVENTS {
         let existing = config["hooks"]
             .get(*event_name)
             .and_then(Value::as_array)
@@ -276,15 +442,16 @@ fn inject_claude_hooks(exe_path: &Path) -> Result<(), String> {
             .filter(|entry| !is_managed_hook_value(entry))
             .collect::<Vec<_>>();
         let mut next_entries = filtered;
-        next_entries.push(json!({
+        let entry = json!({
             "matcher": "*",
             "hooks": [{
                 "type": "command",
                 "command": build_tauri_hook_command(exe_path, "claude", event_name),
-                "timeout": if *event_name == "PermissionRequest" { 86400 } else { 10000 }
+                "timeout": if *event_name == "PermissionRequest" { 86_400 } else { 10_000 }
             }],
             "_managedBy": MANAGED_KEY
-        }));
+        });
+        next_entries.push(entry);
         config["hooks"][*event_name] = Value::Array(next_entries);
     }
     let content = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
@@ -298,17 +465,27 @@ fn build_tauri_hook_command(exe_path: &Path, source: &str, event_name: &str) -> 
     #[cfg(not(windows))]
     let short = exe_path.display().to_string();
     let escaped = short.replace('"', "\\\"");
-    format!("\"{escaped}\" --hook-source {source} --hook-event {event_name}")
+    let esc_source = source.replace('"', "\\\"");
+    let esc_event = event_name.replace('"', "\\\"");
+    format!("\"{escaped}\" --hook-source \"{esc_source}\" --hook-event \"{esc_event}\"")
 }
 
 #[cfg(windows)]
 fn short_path_name(path: &Path) -> String {
     use std::os::windows::ffi::OsStrExt;
-    let wide: Vec<u16> = path.as_os_str().encode_wide().chain(std::iter::once(0)).collect();
+    let wide: Vec<u16> = path
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
     let mut buf = vec![0u16; 512];
     let len = unsafe {
         extern "system" {
-            fn GetShortPathNameW(lpszLongPath: *const u16, lpszShortPath: *mut u16, cchBuffer: u32) -> u32;
+            fn GetShortPathNameW(
+                lpszLongPath: *const u16,
+                lpszShortPath: *mut u16,
+                cchBuffer: u32,
+            ) -> u32;
         }
         GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32)
     };
@@ -335,14 +512,49 @@ fn is_managed_hook_value(value: &Value) -> bool {
         .is_some_and(|hooks| hooks.iter().any(is_managed_hook_value))
 }
 
-fn map_session_status(event_name: &str) -> String {
+struct EventInfo {
+    status: &'static str,
+    summary: &'static str,
+}
+
+fn lookup_event_info(event_name: &str) -> Option<EventInfo> {
     match event_name.to_lowercase().as_str() {
-        "sessionstart" => "Active".to_string(),
-        "stop" | "sessionend" => "Done".to_string(),
-        "permissionrequest" => "Awaiting approval".to_string(),
-        "posttooluse" | "userpromptsubmit" => "Active".to_string(),
-        _ => String::new(),
+        "sessionstart" | "session_start" => Some(EventInfo {
+            status: "Active",
+            summary: "Session started",
+        }),
+        "stop" | "sessionend" | "session_end" | "stopfailure" => Some(EventInfo {
+            status: "Done",
+            summary: "completed",
+        }),
+        "permissionrequest" | "permission_request" => Some(EventInfo {
+            status: "Awaiting approval",
+            summary: "",
+        }),
+        "pretooluse" | "pre_tool_use" => Some(EventInfo {
+            status: "Running tool",
+            summary: "Running tool",
+        }),
+        "posttooluse" | "post_tool_use" | "posttoolusefailure" => Some(EventInfo {
+            status: "Active",
+            summary: "finished",
+        }),
+        "userpromptsubmit" | "user_prompt_submit" => Some(EventInfo {
+            status: "Active",
+            summary: "Prompt submitted",
+        }),
+        "notification" => Some(EventInfo {
+            status: "Active",
+            summary: "Notification",
+        }),
+        _ => None,
     }
+}
+
+fn map_session_status(event_name: &str) -> String {
+    lookup_event_info(event_name)
+        .map(|info| info.status.to_string())
+        .unwrap_or_default()
 }
 
 async fn handle_hook_socket(app: AppHandle, stream: TcpStream) -> Result<(), String> {
@@ -410,13 +622,80 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
         }
         entry.updated_at = now_millis();
         entry.last_event = event_name.to_string();
+        if let Some(jt) = payload
+            .get("jump_target")
+            .or_else(|| payload.get("jumpTarget"))
+        {
+            entry.jump_target = Some(jt.clone());
+        }
     }
 
-    if !event_name.eq_ignore_ascii_case("PermissionRequest") {
+    let event_lower = event_name.to_lowercase();
+    if should_refresh_opencode_usage(source, &event_lower) {
+        let app_for_refresh = app.clone();
+        tauri::async_runtime::spawn(async move {
+            // Cancel previous pending refresh
+            {
+                let state = app_for_refresh.state::<AppState>();
+                let abort_guard = state.opencode_refresh_abort.lock();
+                if let Ok(mut abort) = abort_guard {
+                    if let Some(sender) = abort.take() {
+                        let _ = sender.send(());
+                    }
+                };
+            }
+            let (tx, rx) = tokio::sync::oneshot::channel::<()>();
+            {
+                let state = app_for_refresh.state::<AppState>();
+                let abort_guard = state.opencode_refresh_abort.lock();
+                if let Ok(mut abort) = abort_guard {
+                    *abort = Some(tx);
+                };
+            }
+            tokio::select! {
+                _ = tokio::time::sleep(std::time::Duration::from_millis(700)) => {
+                    refresh_opencode_local_usage(&app_for_refresh);
+                }
+                _ = rx => {
+                    // Cancelled by a newer refresh request
+                }
+            }
+        });
+    }
+
+    if event_lower != "permissionrequest" && event_lower != "permission_request" {
+        let _ = app.emit(
+            "hook-event",
+            json!({
+                "source": source,
+                "event": event_name,
+                "sessionID": payload.get("session_id")
+                    .or_else(|| payload.get("sessionId"))
+                    .or_else(|| data.get("session_id"))
+                    .or_else(|| data.get("sessionId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or(source),
+                "summary": build_event_summary(source, event_name, &payload),
+            }),
+        );
         return json!({ "ok": true, "recorded": true });
     }
 
-    let mut intervention = build_intervention(source, event_name, raw, payload);
+    let is_question = payload
+        .get("tool_name")
+        .or_else(|| payload.get("toolName"))
+        .and_then(Value::as_str)
+        .is_some_and(|t| t == "AskUserQuestion" || t.eq_ignore_ascii_case("askuserquestion"))
+        || payload.get("questionPrompt").is_some()
+        || payload.get("question_prompt").is_some();
+
+    if is_question {
+        let mut intervention = build_intervention(source, event_name, raw, payload);
+        intervention.event = "QuestionAsked".to_string();
+        return await_intervention_decision(app, intervention, true).await;
+    }
+
+    let intervention = build_intervention(source, event_name, raw, payload);
     if is_persistently_allowed(&intervention) {
         return json!({
             "ok": true,
@@ -426,14 +705,35 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
         });
     }
 
+    await_intervention_decision(app, intervention, false).await
+}
+
+async fn await_intervention_decision(
+    app: AppHandle,
+    mut intervention: PendingIntervention,
+    is_question: bool,
+) -> Value {
     let (tx, rx) = oneshot::channel();
     intervention.responder = Some(tx);
+    let question_key = if is_question {
+        question_answer_key(&intervention)
+    } else {
+        None
+    };
     let pending_json = pending_intervention_json(&intervention);
     {
         let app_state = app.state::<AppState>();
         let mut pending = match app_state.intervention.lock() {
             Ok(pending) => pending,
-            Err(_) => return json!({ "ok": true, "requiresDecision": true, "approved": false }),
+            Err(_) => {
+                return json!({
+                    "ok": true,
+                    "requiresDecision": true,
+                    "approved": false,
+                    "allowPersistent": false,
+                    "isQuestion": is_question
+                })
+            }
         };
         if pending.is_some() {
             return json!({
@@ -441,7 +741,8 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
                 "requiresDecision": true,
                 "approved": false,
                 "allowPersistent": false,
-                "message": "ThatIsOK already has a pending approval."
+                "message": "ThatIsOK already has a pending approval.",
+                "isQuestion": is_question
             });
         }
         *pending = Some(intervention);
@@ -449,20 +750,57 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
 
     let _ = app.emit("intervention-state", pending_json);
     let _ = app.emit("island-force-expand", ());
+
     match rx.await {
         Ok(decision) => json!({
             "ok": true,
             "requiresDecision": true,
             "approved": decision.approved,
-            "allowPersistent": decision.allow_persistent
+            "allowPersistent": decision.allow_persistent,
+            "answer": decision.answer,
+            "question": question_key,
+            "isQuestion": is_question
         }),
         Err(_) => json!({
             "ok": true,
             "requiresDecision": true,
             "approved": false,
-            "allowPersistent": false
+            "allowPersistent": false,
+            "isQuestion": is_question
         }),
     }
+}
+
+fn question_answer_key(intervention: &PendingIntervention) -> Option<String> {
+    let tool_input = intervention
+        .meta
+        .get("tool_input")
+        .or_else(|| intervention.meta.get("toolInput"));
+    let first_question = tool_input
+        .and_then(|input| input.get("questions"))
+        .and_then(Value::as_array)
+        .and_then(|questions| questions.first())
+        .and_then(|question| question.get("question"))
+        .and_then(Value::as_str);
+    first_question
+        .or_else(|| {
+            intervention
+                .meta
+                .get("questionPrompt")
+                .or_else(|| intervention.meta.get("question_prompt"))
+                .and_then(Value::as_str)
+        })
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string)
+}
+
+fn should_refresh_opencode_usage(source: &str, event_lower: &str) -> bool {
+    source == "opencode"
+        && matches!(
+            event_lower,
+            "posttooluse" | "post_tool_use" | "stop" | "sessionend" | "session_end"
+        )
 }
 
 fn inject_opencode_hooks() -> Result<(), String> {
@@ -472,10 +810,112 @@ fn inject_opencode_hooks() -> Result<(), String> {
     let plugins_dir = home.join(".config").join("opencode").join("plugins");
     fs::create_dir_all(&plugins_dir).map_err(|err| err.to_string())?;
     let plugin_path = plugins_dir.join("thatisok.js");
-    let plugin_content =
-        include_str!("../plugins/thatisok-opencode.js");
+    let plugin_content = include_str!("../plugins/thatisok-opencode.js");
     fs::write(&plugin_path, plugin_content).map_err(|err| err.to_string())?;
+    register_opencode_plugin(&home, &plugin_path)?;
     Ok(())
+}
+
+fn register_opencode_plugin(home: &Path, plugin_path: &Path) -> Result<(), String> {
+    let config_path = home.join(".config").join("opencode").join("config.json");
+    let mut config = fs::read_to_string(&config_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+        .unwrap_or_else(|| json!({ "$schema": "https://opencode.ai/config.json" }));
+    if !config.get("plugin").is_some_and(Value::is_array) {
+        config["plugin"] = json!([]);
+    }
+    let plugin_uri = format!("file://{}", plugin_path.display());
+    let plugins = config["plugin"]
+        .as_array_mut()
+        .ok_or_else(|| "invalid OpenCode plugin config".to_string())?;
+    let already_registered = plugins
+        .iter()
+        .filter_map(Value::as_str)
+        .any(|item| item == plugin_uri || item.ends_with("/thatisok.js"));
+    if !already_registered {
+        plugins.push(Value::String(plugin_uri));
+    }
+    let content = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
+    fs::write(config_path, format!("{content}\n")).map_err(|err| err.to_string())
+}
+
+fn build_event_summary(source: &str, event_name: &str, payload: &Value) -> String {
+    let tool = payload
+        .get("tool_name")
+        .or_else(|| payload.get("toolName"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let cmd = payload
+        .get("command")
+        .or_else(|| payload.get("cmd"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let prompt = payload
+        .get("prompt")
+        .or_else(|| payload.get("message"))
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    let event_lower = event_name.to_lowercase();
+    let info = lookup_event_info(event_name);
+
+    // "stop"/"sessionend" uses dynamic source label
+    if matches!(event_lower.as_str(), "stop" | "sessionend" | "session_end") {
+        return format!("{} completed", format_source_label(source));
+    }
+
+    // "userpromptsubmit" with prompt text
+    if matches!(
+        event_lower.as_str(),
+        "userpromptsubmit" | "user_prompt_submit"
+    ) {
+        if !prompt.is_empty() {
+            return format!("Prompt: {}", truncate_chars(prompt, 80));
+        }
+        return info.map(|i| i.summary.to_string()).unwrap_or_default();
+    }
+
+    // "pretooluse" with tool/cmd details
+    if matches!(event_lower.as_str(), "pretooluse" | "pre_tool_use") {
+        if !tool.is_empty() && !cmd.is_empty() {
+            return format!("Running {}: {}", tool, truncate_chars(cmd, 60));
+        }
+        if !tool.is_empty() {
+            return format!("Running {}", tool);
+        }
+        return "Running tool".to_string();
+    }
+
+    // "posttooluse" with tool name
+    if matches!(event_lower.as_str(), "posttooluse" | "post_tool_use") {
+        if !tool.is_empty() {
+            return format!("{} finished", tool);
+        }
+        return "Tool finished".to_string();
+    }
+
+    // All other events use the static summary from lookup
+    info.map(|i| i.summary.to_string()).unwrap_or_default()
+}
+
+/// Truncate a string to at most `max_chars` Unicode characters (byte-safe).
+fn truncate_chars(s: &str, max_chars: usize) -> &str {
+    match s.char_indices().nth(max_chars) {
+        Some((idx, _)) => &s[..idx],
+        None => s,
+    }
+}
+
+/// Map source identifier to display label.
+fn format_source_label(source: &str) -> &'static str {
+    match source {
+        "codex" => "Codex",
+        "claude" => "Claude",
+        "gemini" => "Gemini",
+        "opencode" => "OpenCode",
+        _ => "Agent",
+    }
 }
 
 fn emit_runtime_warning(app: &AppHandle, message: &str) {

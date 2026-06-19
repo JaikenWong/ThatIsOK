@@ -342,23 +342,92 @@ body, html {
 .logoRing {
     fill: none;
     stroke: rgba(92, 225, 160, 0.55);
-    stroke-width: 2;
+    stroke-width: 2.5;
     stroke-dasharray: 61 20;
     stroke-linecap: round;
     transform-origin: 16px 16px;
     animation: logoSpin 10s linear infinite;
+    filter: drop-shadow(0 0 2px rgba(92, 225, 160, 0.4));
 }
 
 .logoRingDot {
-    fill: rgba(92, 225, 160, 0.92);
+    fill: rgba(255, 255, 255, 0.95);
     transform-origin: 16px 16px;
     animation: logoSpin 10s linear infinite;
+    filter: drop-shadow(0 0 3px rgba(255, 255, 255, 0.6));
+}
+
+.welcomeGuide {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 16px;
+    border-radius: 16px;
+    background: linear-gradient(135deg, rgba(52, 199, 89, 0.1), rgba(10, 10, 12, 0.4));
+    border: 1px solid rgba(52, 199, 89, 0.2);
+    margin-bottom: 8px;
+}
+
+.welcomeHeader {
+    font-size: 16px;
+    font-weight: 800;
+    color: #a1f7cd;
+}
+
+.welcomeText {
+    font-size: 11px;
+    opacity: 0.8;
+    line-height: 1.4;
+}
+
+.guideSteps {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.guideStep {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.stepIcon {
+    font-size: 16px;
+    background: rgba(255, 255, 255, 0.05);
+    width: 32px;
+    height: 32px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 8px;
+    flex-shrink: 0;
+}
+
+.stepText {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.stepText strong {
+    font-size: 11px;
+    color: white;
+}
+
+.stepText span {
+    font-size: 10px;
+    opacity: 0.6;
 }
 
 .logoEye {
     fill: rgba(255, 255, 255, 0.7);
     transform-origin: center;
     animation: logoBlink 6s ease-in-out infinite;
+}
+
+#island.pill #primaryLabelText {
+    display: none;
 }
 
 .logoEye.rightEye {
@@ -737,10 +806,17 @@ body, html {
 
 .sessions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 5px;
-    padding-top: 0;
+    grid-template-columns: 1fr;
+    gap: 4px;
+    padding: 2px 0 0;
     border-top: none;
+}
+
+.sessionsLabel {
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.42);
+    text-transform: uppercase;
 }
 
 .sessionRow {
@@ -748,10 +824,10 @@ body, html {
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    min-height: 24px;
-    padding: 4px 7px;
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.04);
+    min-height: 22px;
+    padding: 3px 6px;
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.05);
 }
 
@@ -765,6 +841,16 @@ body, html {
     font-size: 10px;
     opacity: 0.72;
     text-transform: capitalize;
+}
+
+.sessionJump {
+    border: 0;
+    border-radius: 7px;
+    padding: 2px 7px;
+    font-size: 9px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.86);
+    background: rgba(94, 234, 159, 0.18);
 }
 
 .actions {
@@ -917,7 +1003,7 @@ body, html {
 }
 
 .interventionTitle {
-    font-size: 12px;
+    font-size: 13px;
     font-weight: 700;
     line-height: 1.25;
     word-break: break-word;
@@ -925,9 +1011,10 @@ body, html {
 
 .interventionDetail {
     font-size: 11px;
-    line-height: 1.3;
-    opacity: 0.84;
+    line-height: 1.35;
+    opacity: 0.88;
     word-break: break-word;
+    color: rgba(255, 255, 255, 0.95);
 }
 
 .interventionCommand {
@@ -936,14 +1023,33 @@ body, html {
     border-radius: 10px;
     background: rgba(0, 0, 0, 0.28);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    font-size: 11px;
+    font-size: 10px;
     line-height: 1.35;
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     white-space: pre-wrap;
     word-break: break-word;
-    color: rgba(255, 255, 255, 0.94);
+    color: rgba(255, 255, 255, 0.82);
     max-height: 112px;
     overflow: auto;
+}
+
+#interventionThinking {
+    background: rgba(255, 255, 255, 0.03);
+    border-color: rgba(255, 255, 255, 0.03);
+    color: rgba(255, 255, 255, 0.5);
+    font-style: italic;
+    max-height: 60px;
+}
+
+#interventionExplanation {
+    padding: 6px 8px;
+    background: rgba(92, 225, 160, 0.08);
+    border-left: 2px solid rgba(92, 225, 160, 0.4);
+    border-radius: 4px;
+    margin-bottom: 2px;
+    font-size: 11px;
+    font-weight: 500;
+    color: #a1f7cd;
 }
 
 .interventionMeta {
@@ -1006,6 +1112,29 @@ body, html {
 .sync {
     background: rgba(255, 255, 255, 0.12);
     color: white;
+    position: relative;
+    overflow: hidden;
+}
+
+.sync.loading {
+    color: rgba(255, 255, 255, 0.4);
+    pointer-events: none;
+}
+
+.sync.loading::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    height: 2px;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.8), transparent);
+    animation: syncSlide 1.2s infinite linear;
+}
+
+@keyframes syncSlide {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
 }
 
 .approve {
@@ -1040,6 +1169,56 @@ body, html {
 .tone-danger {
     background: linear-gradient(180deg, rgba(20, 18, 22, 0.96), rgba(14, 12, 16, 0.94));
     border-color: rgba(255, 90, 90, 0.18);
+}
+
+.btn.jump {
+    background: rgba(97, 191, 255, 0.22);
+    color: #a9ddff;
+    flex: 0 0 auto;
+    min-width: 52px;
+}
+
+.btn.jump:hover {
+    background: rgba(97, 191, 255, 0.36);
+}
+
+.askOptions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 5px;
+    margin-top: 2px;
+}
+
+.btn.askOption {
+    background: rgba(255, 255, 255, 0.08);
+    color: rgba(255, 255, 255, 0.92);
+    font-size: 10px;
+    padding: 5px 9px;
+    border-radius: 8px;
+    flex: 0 0 auto;
+    min-width: 0;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.btn.askOption:hover {
+    background: rgba(92, 225, 160, 0.18);
+}
+
+.sessionJump {
+    background: none;
+    border: none;
+    color: rgba(97, 191, 255, 0.8);
+    cursor: pointer;
+    font-size: 11px;
+    padding: 0 4px;
+    -webkit-app-region: no-drag;
+}
+
+.sessionJump:hover {
+    color: #a9ddff;
 }
 
 .compactHidden {

@@ -6,8 +6,8 @@ use crate::cursor_provider::fetch_cursor_snapshot;
 use crate::local_providers::{fetch_claude_snapshot, fetch_gemini_snapshot, fetch_kiro_snapshot};
 use crate::remote_providers::{fetch_deepseek_snapshot, fetch_minimax_snapshot};
 use crate::{
-    build_config_account, build_config_accounts, fetch_opencode_snapshot, read_json_file,
-    AppState, ProviderVisibility, SessionInfo,
+    build_config_account, build_config_accounts, fetch_opencode_snapshot, read_json_file, AppState,
+    ProviderVisibility, SessionInfo,
 };
 
 pub(crate) fn provider_visibility() -> HashMap<String, ProviderVisibility> {
@@ -65,24 +65,21 @@ pub(crate) fn get_dashboard_data(state: &AppState) -> Value {
                 .iter()
                 .map(|info| {
                     json!({
+                        "id": info.id,
                         "source": info.source,
                         "status": info.status,
+                        "jumpTarget": info.jump_target,
                     })
                 })
                 .collect()
         })
         .unwrap_or_default();
 
-    let synced_at = state
-        .usage
-        .lock()
-        .map(|usage| usage.synced_at)
-        .unwrap_or(0);
+    let synced_at = state.usage.lock().map(|usage| usage.synced_at).unwrap_or(0);
 
     json!({
         "overview": overview,
         "accounts": accounts,
-        "dailySeries": [],
         "recentEvents": [],
         "sessions": sessions,
         "syncedAt": synced_at
@@ -106,8 +103,9 @@ pub(crate) async fn sync_provider_accounts() -> Vec<Value> {
         Err(_) => return build_config_accounts(),
     };
 
-    let mut snapshots = Vec::new();
     let visibility = provider_visibility();
+    let mut tasks = Vec::new();
+
     for account in accounts {
         let Some(provider) = account.get("provider").and_then(Value::as_str) else {
             continue;
@@ -118,27 +116,64 @@ pub(crate) async fn sync_provider_accounts() -> Vec<Value> {
         let account_id = account
             .get("id")
             .and_then(Value::as_str)
-            .unwrap_or(provider);
-        let setting = default_providers.and_then(|items| items.get(provider));
+            .unwrap_or(provider)
+            .to_string();
+        let setting = default_providers
+            .and_then(|items| items.get(provider))
+            .cloned();
         let label = setting
+            .as_ref()
             .and_then(|item| item.get("label"))
             .and_then(Value::as_str)
             .or_else(|| account.get("label").and_then(Value::as_str))
-            .unwrap_or(provider);
+            .unwrap_or(provider)
+            .to_string();
 
-        let snapshot = match provider {
-            "deepseek" => fetch_deepseek_snapshot(&client, account_id, label).await,
-            "minimax" => fetch_minimax_snapshot(&client, account_id, label).await,
-            "claude" => fetch_claude_snapshot(account_id, label),
-            "codex" => fetch_codex_snapshot(&client, account_id, label).await,
-            "cursor" => fetch_cursor_snapshot(&client, account_id, label).await,
-            "gemini" => fetch_gemini_snapshot(account_id, label),
-            "opencode" => fetch_opencode_snapshot(&client, account_id, label).await,
-            "kiro" => fetch_kiro_snapshot(account_id, label),
-            _ => None,
+        let client_clone = client.clone();
+        let provider_str = provider.to_string();
+        let account_clone = account.clone();
+
+        tasks.push(tokio::spawn(async move {
+            let snap = match provider_str.as_str() {
+                "deepseek" => fetch_deepseek_snapshot(&client_clone, &account_id, &label).await,
+                "minimax" => fetch_minimax_snapshot(&client_clone, &account_id, &label).await,
+                "claude" => {
+                    tokio::task::spawn_blocking(move || fetch_claude_snapshot(&account_id, &label))
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                "codex" => fetch_codex_snapshot(&client_clone, &account_id, &label).await,
+                "cursor" => fetch_cursor_snapshot(&client_clone, &account_id, &label).await,
+                "gemini" => {
+                    let aid = account_id.clone();
+                    let lbl = label.clone();
+                    tokio::task::spawn_blocking(move || fetch_gemini_snapshot(&aid, &lbl))
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                "opencode" => fetch_opencode_snapshot(&client_clone, &account_id, &label).await,
+                "kiro" => {
+                    let aid = account_id.clone();
+                    let lbl = label.clone();
+                    tokio::task::spawn_blocking(move || fetch_kiro_snapshot(&aid, &lbl))
+                        .await
+                        .ok()
+                        .flatten()
+                }
+                _ => None,
+            };
+            snap.unwrap_or_else(|| build_config_account(&account_clone, setting.as_ref()))
+        }));
+    }
+
+    let mut snapshots = Vec::new();
+    let results = futures::future::join_all(tasks).await;
+    for res in results {
+        if let Ok(snap) = res {
+            snapshots.push(snap);
         }
-        .unwrap_or_else(|| build_config_account(&account, setting));
-        snapshots.push(snapshot);
     }
     snapshots
 }
@@ -191,17 +226,27 @@ fn compute_overview(accounts: &[Value]) -> Value {
 
     let runway_days: Option<f64> = None;
 
-    let total_balance_val = if has_any_balance { json!(total_balance) } else { Value::Null };
-    let tracked_budget_val = if tracked_budget > 0.0 { json!(tracked_budget) } else { Value::Null };
-    let tracked_used_val = if tracked_used > 0.0 { json!(tracked_used) } else { Value::Null };
+    let total_balance_val = if has_any_balance {
+        json!(total_balance)
+    } else {
+        Value::Null
+    };
+    let tracked_budget_val = if tracked_budget > 0.0 {
+        json!(tracked_budget)
+    } else {
+        Value::Null
+    };
+    let tracked_used_val = if tracked_used > 0.0 {
+        json!(tracked_used)
+    } else {
+        Value::Null
+    };
 
     json!({
         "totalBalanceUsd": total_balance_val,
         "trackedBudgetUsd": tracked_budget_val,
         "trackedUsedUsd": tracked_used_val,
         "quotaPercent": quota_percent,
-        "todayCostUsd": 0,
-        "monthCostUsd": 0,
         "runwayDays": runway_days,
         "runwayDaysLabel": "--"
     })

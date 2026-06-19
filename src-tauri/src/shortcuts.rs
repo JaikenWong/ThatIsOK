@@ -1,9 +1,7 @@
 use tauri::{AppHandle, Emitter, Manager};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
-use crate::{
-    main_window, persist_approval_rule, set_mode, AppState, InterventionDecision,
-};
+use crate::{main_window, persist_approval_rule, set_mode, AppState, InterventionDecision};
 
 pub(crate) fn register_shortcuts(app: &AppHandle) {
     let toggle_modifiers = platform_toggle_modifiers();
@@ -125,6 +123,7 @@ fn respond_to_intervention(app: &AppHandle, decision: &str) {
         let _ = responder.send(InterventionDecision {
             approved,
             allow_persistent,
+            answer: None,
         });
     }
     let _ = app.emit("intervention-state", Option::<serde_json::Value>::None);

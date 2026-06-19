@@ -6,8 +6,8 @@ mod providers;
 mod remote_providers;
 mod shortcuts;
 
-use rusqlite::Connection;
 use chrono::{Datelike, TimeZone};
+use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::collections::HashMap;
@@ -29,13 +29,37 @@ const WINDOW_MARGIN: i32 = 12;
 const MANAGED_KEY: &str = "ThatIsOk";
 const DEFAULTS_JSON: &str = include_str!("../../config/defaults.json");
 const PROVIDERS_JSON: &str = include_str!("../../config/providers.json");
-const HOOK_EVENTS: &[&str] = &[
+const ALL_HOOK_EVENTS: &[&str] = &[
     "SessionStart",
     "UserPromptSubmit",
     "PreToolUse",
     "PostToolUse",
     "Stop",
     "PermissionRequest",
+];
+const CODEX_HOOK_EVENTS: &[&str] = &[
+    "SessionStart",
+    "UserPromptSubmit",
+    "PreToolUse",
+    "PostToolUse",
+    "PermissionRequest",
+    "Stop",
+];
+const CLAUDE_HOOK_EVENTS: &[&str] = &[
+    "UserPromptSubmit",
+    "SessionStart",
+    "SessionEnd",
+    "Stop",
+    "StopFailure",
+    "SubagentStart",
+    "SubagentStop",
+    "Notification",
+    "PreToolUse",
+    "PermissionRequest",
+    "PostToolUse",
+    "PostToolUseFailure",
+    "PermissionDenied",
+    "PreCompact",
 ];
 
 #[derive(Default)]
@@ -45,6 +69,7 @@ struct AppState {
     intervention: Mutex<Option<PendingIntervention>>,
     sessions: Mutex<HashMap<String, SessionInfo>>,
     sync: SyncState,
+    opencode_refresh_abort: Mutex<Option<tokio::sync::oneshot::Sender<()>>>,
 }
 
 #[derive(Clone)]
@@ -75,6 +100,7 @@ struct SessionInfo {
     status: String,
     updated_at: u128,
     last_event: String,
+    jump_target: Option<Value>,
 }
 
 #[derive(Clone, Copy, Deserialize)]
@@ -117,19 +143,23 @@ struct PendingIntervention {
     event: String,
     title: String,
     detail: String,
+    explanation: String,
+    thinking: String,
     command: String,
     file_path: String,
     tool_name: String,
     raw: String,
     meta: Value,
+    jump_target: Option<Value>,
     created_at: u128,
     responder: Option<oneshot::Sender<InterventionDecision>>,
 }
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 struct InterventionDecision {
     approved: bool,
     allow_persistent: bool,
+    answer: Option<String>,
 }
 
 #[derive(Clone, Deserialize, Serialize)]
@@ -335,7 +365,9 @@ fn build_config_account(account: &Value, setting: Option<&Value>) -> Value {
         .and_then(Value::as_str)
         .or_else(|| account.get("label").and_then(Value::as_str))
         .unwrap_or(provider);
-    let manual_plan = setting.and_then(|item| item.get("manualPlan")).and_then(Value::as_str);
+    let manual_plan = setting
+        .and_then(|item| item.get("manualPlan"))
+        .and_then(Value::as_str);
     let plan = manual_plan.unwrap_or("Local setup");
     let mut lines = vec![json!({
         "type": "text",
@@ -434,17 +466,14 @@ async fn fetch_opencode_snapshot(
         .send()
         .await
     {
-        Ok(resp) if resp.status().is_success() => {
-            match resp.json::<Value>().await {
-                Ok(data) => {
-                    data.get("data")
-                        .and_then(Value::as_array)
-                        .map(|models| models.len())
-                        .unwrap_or(0)
-                }
-                Err(_) => 0,
-            }
-        }
+        Ok(resp) if resp.status().is_success() => match resp.json::<Value>().await {
+            Ok(data) => data
+                .get("data")
+                .and_then(Value::as_array)
+                .map(|models| models.len())
+                .unwrap_or(0),
+            Err(_) => 0,
+        },
         _ => 0,
     };
 
@@ -500,44 +529,23 @@ async fn fetch_opencode_snapshot(
     }))
 }
 
+#[derive(Default)]
+struct CostRow {
+    created_ms: i64,
+    cost: f64,
+}
+
 fn build_opencode_go_lines(db_path: &Path) -> Option<Vec<Value>> {
     let conn = Connection::open(db_path).ok()?;
-    let sql = "SELECT data FROM message WHERE json_valid(data) AND json_extract(data, '$.providerID') = 'opencode-go' AND json_extract(data, '$.role') = 'assistant' AND json_type(data, '$.cost') IN ('integer', 'real')";
-    let mut stmt = conn.prepare(sql).ok()?;
-    let rows = stmt
-        .query_map([], |row| row.get::<_, String>(0))
-        .ok()?;
-
     let now_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis() as i64;
 
-    #[derive(Default)]
-    struct CostRow {
-        created_ms: i64,
-        cost: f64,
+    let mut costs = read_opencode_session_costs(&conn).unwrap_or_default();
+    if costs.is_empty() {
+        costs = read_opencode_message_costs(&conn, now_ms).unwrap_or_default();
     }
-
-    let mut costs: Vec<CostRow> = Vec::new();
-    for row in rows {
-        let Ok(data_str) = row else { continue };
-        let Ok(data) = serde_json::from_str::<Value>(&data_str) else {
-            continue;
-        };
-        let cost = data.get("cost").and_then(read_number_value).unwrap_or(0.0);
-        if cost <= 0.0 {
-            continue;
-        }
-        let created_ms = data
-            .get("time")
-            .and_then(|t| t.get("created"))
-            .and_then(read_number_value)
-            .map(|v| v as i64)
-            .unwrap_or(now_ms);
-        costs.push(CostRow { created_ms, cost });
-    }
-    drop(stmt);
     drop(conn);
 
     if costs.is_empty() {
@@ -584,8 +592,7 @@ fn build_opencode_go_lines(db_path: &Path) -> Option<Vec<Value>> {
     // Compute monthly bounds anchored to the day-of-month of the earliest usage row
     fn anchored_month(now_ms: i64, anchor_ms: i64) -> (i64, i64) {
         let now_secs = now_ms / 1000;
-        let now_dt =
-            chrono::DateTime::from_timestamp(now_secs, 0).unwrap_or_else(chrono::Utc::now);
+        let now_dt = chrono::DateTime::from_timestamp(now_secs, 0).unwrap_or_else(chrono::Utc::now);
         let anchor_secs = anchor_ms / 1000;
         let anchor_dt =
             chrono::DateTime::from_timestamp(anchor_secs, 0).unwrap_or_else(chrono::Utc::now);
@@ -716,6 +723,112 @@ fn build_opencode_go_lines(db_path: &Path) -> Option<Vec<Value>> {
     Some(lines)
 }
 
+fn read_opencode_session_costs(conn: &Connection) -> Option<Vec<CostRow>> {
+    let sql = "SELECT time_updated, cost FROM session WHERE cost > 0 AND json_valid(model) AND json_extract(model, '$.providerID') = 'opencode-go'";
+    let mut stmt = conn.prepare(sql).ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok(CostRow {
+                created_ms: row.get::<_, i64>(0)?,
+                cost: row.get::<_, f64>(1)?,
+            })
+        })
+        .ok()?;
+    let mut costs = Vec::new();
+    for row in rows {
+        let Ok(item) = row else { continue };
+        if item.created_ms > 0 && item.cost > 0.0 {
+            costs.push(item);
+        }
+    }
+    Some(costs)
+}
+
+fn read_opencode_message_costs(conn: &Connection, now_ms: i64) -> Option<Vec<CostRow>> {
+    let sql = "SELECT data FROM message WHERE json_valid(data) AND json_extract(data, '$.providerID') = 'opencode-go' AND json_extract(data, '$.role') = 'assistant' AND json_type(data, '$.cost') IN ('integer', 'real')";
+    let mut stmt = conn.prepare(sql).ok()?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(0)).ok()?;
+    let mut costs = Vec::new();
+    for row in rows {
+        let Ok(data_str) = row else { continue };
+        let Ok(data) = serde_json::from_str::<Value>(&data_str) else {
+            continue;
+        };
+        let cost = data.get("cost").and_then(read_number_value).unwrap_or(0.0);
+        if cost <= 0.0 {
+            continue;
+        }
+        let created_ms = data
+            .get("time")
+            .and_then(|t| t.get("created"))
+            .and_then(read_number_value)
+            .map(|v| v as i64)
+            .unwrap_or(now_ms);
+        costs.push(CostRow { created_ms, cost });
+    }
+    Some(costs)
+}
+
+pub(crate) fn refresh_opencode_local_usage(app: &AppHandle) {
+    let Some(home) = dirs::home_dir() else {
+        return;
+    };
+    let db_path = home
+        .join(".local")
+        .join("share")
+        .join("opencode")
+        .join("opencode.db");
+    if !db_path.exists() {
+        return;
+    }
+
+    let Some(new_usage_lines) = build_opencode_go_lines(&db_path) else {
+        return; // No data — keep existing lines intact
+    };
+    if new_usage_lines.is_empty() {
+        return; // No usage lines computed — keep existing lines intact
+    }
+    let state = app.state::<AppState>();
+    let mut usage = match state.usage.lock() {
+        Ok(usage) => usage,
+        Err(_) => return,
+    };
+
+    if usage.balances.is_empty() {
+        usage.balances = build_config_accounts();
+    }
+
+    let Some(account) = usage
+        .balances
+        .iter_mut()
+        .find(|account| account.get("provider").and_then(Value::as_str) == Some("opencode"))
+    else {
+        return;
+    };
+
+    let mut lines = account
+        .get("lines")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|line| {
+            let label = line.get("label").and_then(Value::as_str).unwrap_or("");
+            !(line.get("type").and_then(Value::as_str) == Some("progress")
+                && matches!(label, "Session" | "Weekly" | "Monthly"))
+        })
+        .collect::<Vec<_>>();
+
+    lines.extend(new_usage_lines);
+    account["lines"] = Value::Array(lines);
+    account["capturedAt"] = json!(now_millis());
+    usage.synced_at = now_millis();
+    drop(usage);
+
+    let data = get_dashboard_data(&state);
+    let _ = app.emit("island-data", data);
+}
+
 pub(crate) fn read_number_value(value: &Value) -> Option<f64> {
     value.as_f64().or_else(|| {
         value
@@ -782,11 +895,14 @@ fn pending_intervention_json(pending: &PendingIntervention) -> Value {
         "event": pending.event,
         "title": pending.title,
         "detail": pending.detail,
+        "explanation": pending.explanation,
+        "thinking": pending.thinking,
         "command": pending.command,
         "filePath": pending.file_path,
         "toolName": pending.tool_name,
         "raw": pending.raw,
         "meta": pending.meta,
+        "jumpTarget": pending.jump_target,
         "createdAt": pending.created_at
     })
 }
@@ -908,7 +1024,21 @@ fn char_preview(value: &str, limit: usize) -> String {
     preview
 }
 
-fn tool_input_summary(tool_name: &str, input: Option<&serde_json::Map<String, Value>>, file_path: &str, command: &str) -> Option<String> {
+#[cfg(target_os = "macos")]
+fn applescript_string(value: &str) -> String {
+    value
+        .replace('\\', "\\\\")
+        .replace('"', "\\\"")
+        .replace('\n', " ")
+        .replace('\r', " ")
+}
+
+fn tool_input_summary(
+    tool_name: &str,
+    input: Option<&serde_json::Map<String, Value>>,
+    file_path: &str,
+    command: &str,
+) -> Option<String> {
     let tool = tool_name.to_ascii_lowercase();
     if tool == "bash" || !command.is_empty() {
         return Some(format!("Command: {}", char_preview(command, 180)));
@@ -918,31 +1048,69 @@ fn tool_input_summary(tool_name: &str, input: Option<&serde_json::Map<String, Va
         return None;
     };
 
-    if tool == "write" || tool == "notebookwrite" {
+    if tool == "write" || tool == "notebookwrite" || tool == "edit" {
         let content = input
             .get("content")
             .or_else(|| input.get("new_string"))
+            .or_else(|| input.get("text"))
             .and_then(Value::as_str)
             .unwrap_or("");
         let line_count = content.lines().count();
-        if !file_path.is_empty() {
-            return Some(format!("File: {file_path} · writing {line_count} lines"));
+        let target = if !file_path.is_empty() {
+            file_path
+        } else {
+            "file"
+        };
+        if tool == "edit" {
+            let old = input
+                .get("old_string")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let new_value = input
+                .get("new_string")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            if !old.is_empty() {
+                if !new_value.is_empty() {
+                    return Some(format!(
+                        "Edit {target}: replace \"{}\" with \"{}\" ({} lines)",
+                        char_preview(old, 40),
+                        char_preview(new_value, 40),
+                        line_count
+                    ));
+                }
+                return Some(format!(
+                    "Edit {target}: replace \"{}\" ({} lines)",
+                    char_preview(old, 40),
+                    line_count
+                ));
+            }
         }
-        return Some(format!("Writing {line_count} lines"));
+        return Some(format!("Write {target}: writing {line_count} lines"));
     }
 
-    if tool == "edit" {
-        let old_text = input.get("old_string").and_then(Value::as_str).unwrap_or("");
-        let new_text = input.get("new_string").and_then(Value::as_str).unwrap_or("");
-        if !old_text.is_empty() || !new_text.is_empty() {
+    if tool == "grep" || tool == "search" || tool == "glob" {
+        let pattern = input
+            .get("pattern")
+            .or_else(|| input.get("query"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let path = input
+            .get("path")
+            .or_else(|| input.get("dir_path"))
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        if !pattern.is_empty() {
             return Some(format!(
-                "Replace: {} → {}",
-                char_preview(old_text, 70),
-                char_preview(new_text, 70)
+                "Search \"{pattern}\" in {}",
+                if path.is_empty() { "current dir" } else { path }
             ));
         }
+    }
+
+    if tool == "read" || tool == "read_file" {
         if !file_path.is_empty() {
-            return Some(format!("File: {file_path}"));
+            return Some(format!("Read file: {file_path}"));
         }
     }
 
@@ -989,7 +1157,10 @@ fn emit_sync_warning_if_needed(app: &AppHandle, accounts: &[Value]) {
 
     emit_runtime_warning(
         app,
-        &format!("Sync issues: {}. Check provider credentials or network access.", failed.join(", ")),
+        &format!(
+            "Sync issues: {}. Check provider credentials or network access.",
+            failed.join(", ")
+        ),
     );
 }
 
@@ -1008,7 +1179,24 @@ fn build_intervention(
         .unwrap_or("permission")
         .to_string();
     let command = string_field(&payload, &["command", "cmd"]);
-    let file_path = string_field(&payload, &["file_path", "filePath", "path", "notebook_path"]);
+    let file_path = string_field(
+        &payload,
+        &["file_path", "filePath", "path", "notebook_path"],
+    );
+
+    let explanation = payload
+        .get("explanation_zh")
+        .or_else(|| payload.get("explanation"))
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
+    let thinking = payload
+        .get("thinking")
+        .and_then(Value::as_str)
+        .unwrap_or("")
+        .to_string();
+
     let detail = payload
         .get("reason")
         .or_else(|| payload.get("message"))
@@ -1016,6 +1204,13 @@ fn build_intervention(
         .and_then(Value::as_str)
         .filter(|s| !s.is_empty() && s.len() < 300)
         .map(str::to_string)
+        .or_else(|| {
+            if !explanation.is_empty() {
+                Some(explanation.clone())
+            } else {
+                None
+            }
+        })
         .or_else(|| tool_input_summary(&tool_name, input, &file_path, &command))
         .or_else(|| {
             if !tool_name.is_empty() && tool_name != "permission" {
@@ -1027,7 +1222,13 @@ fn build_intervention(
             }
         })
         .unwrap_or_else(|| "Confirm this action".to_string());
-    let source_label = if source == "codex" { "Codex" } else if source == "claude" { "Claude" } else { "Agent" };
+    let source_label = if source == "codex" {
+        "Codex"
+    } else if source == "claude" {
+        "Claude"
+    } else {
+        "Agent"
+    };
     let prompt_text = payload
         .get("prompt")
         .or_else(|| payload.get("message"))
@@ -1043,7 +1244,10 @@ fn build_intervention(
     } else if !file_path.is_empty() {
         format!("{source_label} wants to use {tool_name} on {file_path}")
     } else if !command.is_empty() {
-        format!("{source_label} wants to run: {}", command.chars().take(80).collect::<String>())
+        format!(
+            "{source_label} wants to run: {}",
+            command.chars().take(80).collect::<String>()
+        )
     } else if !tool_name.is_empty() && tool_name != "permission" {
         format!("{source_label} wants to use {tool_name}")
     } else if let Some(ref p) = prompt_text {
@@ -1052,17 +1256,25 @@ fn build_intervention(
         format!("{source_label} needs approval")
     };
 
+    let jump_target = payload
+        .get("jump_target")
+        .or_else(|| payload.get("jumpTarget"))
+        .cloned();
+
     PendingIntervention {
         id: format!("req_{}", now_millis()),
         source: source.to_string(),
         event: event_name.to_string(),
         title,
         detail,
+        explanation,
+        thinking,
         command,
         file_path,
         tool_name,
         raw: raw.to_string(),
         meta: payload,
+        jump_target,
         created_at: now_millis(),
         responder: None,
     }
@@ -1143,12 +1355,19 @@ async fn island_sync_now(app: AppHandle) -> Result<Value, String> {
         let state = app.state::<AppState>();
         let mut usage = state.usage.lock().map_err(|e| e.to_string())?;
         usage.balances = accounts;
+        usage.synced_at = now_millis();
     }
     let data = {
         let state = app.state::<AppState>();
         get_dashboard_data(&state)
     };
-    emit_sync_warning_if_needed(&app, data.get("accounts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]));
+    emit_sync_warning_if_needed(
+        &app,
+        data.get("accounts")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    );
     let _ = app.emit("island-data", data.clone());
     Ok(data)
 }
@@ -1267,9 +1486,9 @@ fn island_drag_end(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-fn intervention_respond(app: AppHandle, decision: String) -> bool {
+async fn intervention_respond(app: AppHandle, decision: String, answer: Option<String>) -> bool {
     let app_state = app.state::<AppState>();
-    let mut pending = match app_state.intervention.lock() {
+    let mut pending = match app_state.intervention.try_lock() {
         Ok(pending) => pending,
         Err(_) => return false,
     };
@@ -1285,11 +1504,109 @@ fn intervention_respond(app: AppHandle, decision: String) -> bool {
         let _ = responder.send(InterventionDecision {
             approved,
             allow_persistent,
+            answer: answer.and_then(|value| {
+                let trimmed = value.trim().to_string();
+                if trimmed.is_empty() {
+                    None
+                } else {
+                    Some(trimmed)
+                }
+            }),
         });
     }
     let _ = app.emit("intervention-state", Option::<Value>::None);
     let _ = set_mode(&app, "pill");
     true
+}
+
+#[tauri::command]
+async fn jump_to_terminal(target: Value) -> Result<bool, String> {
+    let terminal_app = target
+        .get("terminalApp")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let tty = target
+        .get("terminalTTY")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+    let cwd = target
+        .get("workingDirectory")
+        .and_then(Value::as_str)
+        .unwrap_or("");
+
+    #[cfg(target_os = "macos")]
+    {
+        let tty = applescript_string(tty);
+        let script = match terminal_app.to_lowercase().as_str() {
+            "iterm" | "iterm2" => format!(
+                "tell application \"iTerm2\"\n\
+                    activate\n\
+                    repeat with aWindow in windows\n\
+                        repeat with aTab in tabs of aWindow\n\
+                            repeat with aSession in sessions of aTab\n\
+                                if (tty of aSession as text) is \"{}\" then\n\
+                                    select aSession\n\
+                                    return true\n\
+                                end if\n\
+                            end repeat\n\
+                        end repeat\n\
+                    end repeat\n\
+                end tell",
+                tty
+            ),
+            "terminal" => format!(
+                "tell application \"Terminal\"\n\
+                    activate\n\
+                    repeat with aWindow in windows\n\
+                        repeat with aTab in tabs of aWindow\n\
+                            if (tty of aTab as text) is \"{}\" then\n\
+                                set selected of aTab to true\n\
+                                set frontmost of aWindow to true\n\
+                                return true\n\
+                            end if\n\
+                        end repeat\n\
+                    end repeat\n\
+                end tell",
+                tty
+            ),
+            _ => {
+                if !cwd.is_empty() {
+                    return std::process::Command::new("open")
+                        .arg(cwd)
+                        .status()
+                        .map(|status| status.success())
+                        .map_err(|e| e.to_string());
+                } else {
+                    return Ok(false);
+                }
+            }
+        };
+
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&script)
+            .output()
+            .map_err(|e| e.to_string())?;
+
+        return Ok(output.status.success());
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        // On Windows, focusing a specific tab in Windows Terminal is harder without specialized APIs.
+        // We'll try to use 'wt' CLI to at least open a new tab in that CWD as a fallback,
+        // or just use explorer to open the path.
+        if !cwd.is_empty() {
+            let _ = std::process::Command::new("explorer").arg(cwd).spawn();
+            return Ok(true);
+        }
+        return Ok(false);
+    }
+
+    #[cfg(not(any(target_os = "macos", target_os = "windows")))]
+    {
+        Ok(false)
+    }
 }
 
 #[tauri::command]
@@ -1389,6 +1706,35 @@ fn initialize_sync_interval(app: &AppHandle) {
     }
 }
 
+fn hooks_enabled() -> bool {
+    read_json_file("defaults.json")
+        .get("hooksEnabled")
+        .and_then(Value::as_bool)
+        .unwrap_or(true)
+}
+
+fn set_hooks_enabled(enabled: bool) -> Result<(), String> {
+    let mut defaults = read_json_file("defaults.json");
+    defaults["hooksEnabled"] = json!(enabled);
+    write_defaults(&defaults)
+}
+
+fn install_hooks(app: &AppHandle) -> Result<(), String> {
+    set_hooks_enabled(true)?;
+    hooks::inject_agent_hooks(app);
+    Ok(())
+}
+
+fn uninstall_hooks(app: &AppHandle) -> Result<(), String> {
+    set_hooks_enabled(false)?;
+    hooks::remove_agent_hooks()?;
+    emit_runtime_warning(
+        app,
+        "ThatIsOK hooks removed. Agent integrations are disabled until hooks are installed again.",
+    );
+    Ok(())
+}
+
 async fn perform_initial_sync(app: AppHandle) {
     let accounts = sync_provider_accounts().await;
     let _ = replace_usage_balances(&app, accounts);
@@ -1396,7 +1742,13 @@ async fn perform_initial_sync(app: AppHandle) {
         let state = app.state::<AppState>();
         get_dashboard_data(&state)
     };
-    emit_sync_warning_if_needed(&app, data.get("accounts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]));
+    emit_sync_warning_if_needed(
+        &app,
+        data.get("accounts")
+            .and_then(Value::as_array)
+            .map(Vec::as_slice)
+            .unwrap_or(&[]),
+    );
     let _ = app.emit("island-data", data);
 }
 
@@ -1420,7 +1772,13 @@ fn schedule_periodic_sync(app: AppHandle) {
                 let state = app.state::<AppState>();
                 get_dashboard_data(&state)
             };
-            emit_sync_warning_if_needed(&app, data.get("accounts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]));
+            emit_sync_warning_if_needed(
+                &app,
+                data.get("accounts")
+                    .and_then(Value::as_array)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]),
+            );
             let _ = app.emit("island-data", data);
         }
     });
@@ -1463,7 +1821,8 @@ pub fn run() {
             providers_set_visibility,
             settings_get,
             settings_set_sync_interval,
-            app_restart
+            app_restart,
+            jump_to_terminal
         ])
         .setup(|app| {
             #[cfg(target_os = "macos")]
@@ -1510,6 +1869,12 @@ pub fn run() {
                 let sync_item = MenuItemBuilder::with_id("sync", "Sync Now")
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
+                let install_hooks_item = MenuItemBuilder::with_id("install-hooks", "Install Hooks")
+                    .build(app)
+                    .map_err(|e| format!("tray menu: {e}")).ok();
+                let remove_hooks_item = MenuItemBuilder::with_id("remove-hooks", "Remove Hooks")
+                    .build(app)
+                    .map_err(|e| format!("tray menu: {e}")).ok();
                 let version = app.package_info().version.to_string();
                 let update_item = MenuItemBuilder::with_id("update", format!("ThatIsOK v{version}"))
                     .build(app)
@@ -1520,11 +1885,34 @@ pub fn run() {
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
 
-                if let (Some(open), Some(sync_item), Some(update_item), Some(sep), Some(quit_item)) =
-                    (open, sync_item, update_item, sep, quit_item)
+                if let (
+                    Some(open),
+                    Some(sync_item),
+                    Some(install_hooks_item),
+                    Some(remove_hooks_item),
+                    Some(update_item),
+                    Some(sep),
+                    Some(quit_item),
+                ) = (
+                    open,
+                    sync_item,
+                    install_hooks_item,
+                    remove_hooks_item,
+                    update_item,
+                    sep,
+                    quit_item,
+                )
                 {
                     let menu = MenuBuilder::new(app)
-                        .items(&[&open, &sync_item, &update_item, &sep, &quit_item])
+                        .items(&[
+                            &open,
+                            &sync_item,
+                            &install_hooks_item,
+                            &remove_hooks_item,
+                            &update_item,
+                            &sep,
+                            &quit_item,
+                        ])
                         .build()
                         .map_err(|e| format!("tray menu: {e}")).ok();
 
@@ -1554,6 +1942,27 @@ pub fn run() {
                                             emit_sync_warning_if_needed(&h, data.get("accounts").and_then(Value::as_array).map(Vec::as_slice).unwrap_or(&[]));
                                             let _ = h.emit("island-data", data);
                                         });
+                                    }
+                                    "install-hooks" => {
+                                        if let Err(error) = install_hooks(&app_handle_inner) {
+                                            emit_runtime_warning(
+                                                &app_handle_inner,
+                                                &format!("Hook install failed: {error}"),
+                                            );
+                                        } else {
+                                            emit_runtime_warning(
+                                                &app_handle_inner,
+                                                "ThatIsOK hooks installed.",
+                                            );
+                                        }
+                                    }
+                                    "remove-hooks" => {
+                                        if let Err(error) = uninstall_hooks(&app_handle_inner) {
+                                            emit_runtime_warning(
+                                                &app_handle_inner,
+                                                &format!("Hook removal failed: {error}"),
+                                            );
+                                        }
                                     }
                                     "update" => {
                                         use tauri_plugin_updater::UpdaterExt;
@@ -1626,7 +2035,9 @@ pub fn run() {
             });
 
             // Hook injection
-            hooks::inject_agent_hooks(app.handle());
+            if hooks_enabled() {
+                hooks::inject_agent_hooks(app.handle());
+            }
 
             // Initial data emission
             let data = get_dashboard_data(&app.state::<AppState>());

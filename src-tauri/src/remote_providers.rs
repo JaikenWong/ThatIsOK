@@ -13,8 +13,8 @@ pub(crate) async fn fetch_deepseek_snapshot(
         Some(api_key) => api_key,
         None => return None,
     };
-    let base_url =
-        read_env_value(&["DEEPSEEK_BASE_URL"]).unwrap_or_else(|| "https://api.deepseek.com".to_string());
+    let base_url = read_env_value(&["DEEPSEEK_BASE_URL"])
+        .unwrap_or_else(|| "https://api.deepseek.com".to_string());
     let response = client
         .get(format!("{base_url}/user/balance"))
         .bearer_auth(api_key)
@@ -211,7 +211,10 @@ fn build_minimax_snapshot(
     .unwrap_or(0.0);
     let remaining_percent = read_number_field(
         chosen,
-        &["current_interval_remaining_percent", "currentIntervalRemainingPercent"],
+        &[
+            "current_interval_remaining_percent",
+            "currentIntervalRemainingPercent",
+        ],
     );
     let display_multiplier = if region == "CN" {
         1.0 / MINIMAX_MODEL_CALLS_PER_PROMPT
@@ -230,10 +233,16 @@ fn build_minimax_snapshot(
                 "currentIntervalRemainingCount",
                 "current_interval_remains_count",
                 "currentIntervalRemainsCount",
+                "current_interval_usage_count",
+                "currentIntervalUsageCount",
+                "current_interval_remain_count",
+                "currentIntervalRemainCount",
                 "remaining_count",
                 "remainingCount",
                 "remaining",
                 "remains",
+                "left_count",
+                "leftCount",
             ],
         );
         let explicit_used = read_number_field(
@@ -262,9 +271,10 @@ fn build_minimax_snapshot(
     let resets_at = read_number_field(chosen, &["end_time", "endTime"])
         .and_then(epoch_to_ms)
         .map(iso_from_ms);
-    let weekly_active = read_number_field(chosen, &["current_weekly_status", "currentWeeklyStatus"])
-        .map(|s| s as i64)
-        == Some(1);
+    let weekly_active =
+        read_number_field(chosen, &["current_weekly_status", "currentWeeklyStatus"])
+            .map(|s| s as i64)
+            == Some(1);
     let plan = infer_minimax_plan(total, region).unwrap_or_else(|| "MiniMax".to_string());
     let plan_with_region = format!("{plan} ({region})");
     let line_5h = if is_percent_mode {
@@ -300,7 +310,10 @@ fn build_minimax_snapshot(
         .unwrap_or(0.0);
         let w_remaining_percent = read_number_field(
             chosen,
-            &["current_weekly_remaining_percent", "currentWeeklyRemainingPercent"],
+            &[
+                "current_weekly_remaining_percent",
+                "currentWeeklyRemainingPercent",
+            ],
         );
         let w_has_count = w_total > 0.0 && (w_total * display_multiplier).round() > 0.0;
         let w_resets_at = read_number_field(chosen, &["weekly_end_time", "weeklyEndTime"])
@@ -326,8 +339,12 @@ fn build_minimax_snapshot(
                     "currentWeeklyRemainingCount",
                     "current_weekly_remains_count",
                     "currentWeeklyRemainsCount",
+                    "current_weekly_usage_count",
+                    "currentWeeklyUsageCount",
                     "weekly_remaining_count",
                     "weeklyRemainingCount",
+                    "weekly_remains_count",
+                    "weeklyRemainsCount",
                 ],
             );
             let w_explicit_used = read_number_field(
@@ -338,7 +355,9 @@ fn build_minimax_snapshot(
             let w_raw_used = w_explicit_used.unwrap_or_else(|| {
                 (w_total - w_inferred_remaining.unwrap_or(w_total)).clamp(0.0, w_total)
             });
-            let w_raw_remaining = w_inferred_remaining.unwrap_or(w_total - w_raw_used).max(0.0);
+            let w_raw_remaining = w_inferred_remaining
+                .unwrap_or(w_total - w_raw_used)
+                .max(0.0);
             let w_remaining = (w_raw_remaining * display_multiplier).round();
             let w_total_out = (w_total * display_multiplier).round();
             json!({
@@ -415,7 +434,10 @@ fn pick_minimax_remain<'a>(remains: &'a [Value], region: &str) -> Option<&'a Val
         }
         let percent = read_number_field(
             item,
-            &["current_interval_remaining_percent", "currentIntervalRemainingPercent"],
+            &[
+                "current_interval_remaining_percent",
+                "currentIntervalRemainingPercent",
+            ],
         );
         if percent.is_some_and(|percent| (0.0..=100.0).contains(&percent)) {
             if percent_any.is_none() {
@@ -426,7 +448,10 @@ fn pick_minimax_remain<'a>(remains: &'a [Value], region: &str) -> Option<&'a Val
             }
         }
     }
-    count_general.or(count_any).or(percent_general).or(percent_any)
+    count_general
+        .or(count_any)
+        .or(percent_general)
+        .or(percent_any)
 }
 
 fn error_snapshot(account_id: &str, provider: &str, label: &str, message: String) -> Value {

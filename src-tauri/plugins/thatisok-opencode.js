@@ -20,7 +20,7 @@ debug("plugin loaded");
 
 const TCP_HOST = "127.0.0.1";
 const TCP_PORT = 45873;
-const PERMISSION_TIMEOUT_MS = 300_000; // 5 min — matches ThatIsOK hook timeout
+const PERMISSION_TIMEOUT_MS = 3_600_000; // 1h — user may review approvals away from terminal
 
 const HOOK_EVENTS = {
   "session.created": "SessionStart",

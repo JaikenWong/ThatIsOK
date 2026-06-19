@@ -37,7 +37,12 @@ pub(crate) async fn fetch_cursor_snapshot(
         .await
         .ok();
 
-    Some(build_cursor_snapshot(account_id, label, &usage, plan.as_ref()))
+    Some(build_cursor_snapshot(
+        account_id,
+        label,
+        &usage,
+        plan.as_ref(),
+    ))
 }
 
 fn read_cursor_token() -> Option<String> {
@@ -149,9 +154,16 @@ async fn fetch_cursor_api(
     resp.json().await.map_err(|e| e.to_string())
 }
 
-fn build_cursor_snapshot(account_id: &str, label: &str, usage: &Value, plan: Option<&Value>) -> Value {
+fn build_cursor_snapshot(
+    account_id: &str,
+    label: &str,
+    usage: &Value,
+    plan: Option<&Value>,
+) -> Value {
     let plan_usage = usage.get("planUsage").or_else(|| usage.get("plan_usage"));
-    let spend_limit = usage.get("spendLimitUsage").or_else(|| usage.get("spend_limit_usage"));
+    let spend_limit = usage
+        .get("spendLimitUsage")
+        .or_else(|| usage.get("spend_limit_usage"));
 
     let limit_cents = plan_usage
         .and_then(|p| p.get("limit"))
@@ -177,10 +189,22 @@ fn build_cursor_snapshot(account_id: &str, label: &str, usage: &Value, plan: Opt
         .and_then(Value::as_f64)
         .unwrap_or(0.0);
 
-    let limit_dollars = if limit_cents > 0.0 { Some(limit_cents / 100.0) } else { None };
-    let remaining_dollars = if limit_cents > 0.0 { Some(remaining_cents / 100.0) } else { None };
+    let limit_dollars = if limit_cents > 0.0 {
+        Some(limit_cents / 100.0)
+    } else {
+        None
+    };
+    let remaining_dollars = if limit_cents > 0.0 {
+        Some(remaining_cents / 100.0)
+    } else {
+        None
+    };
     let used_cents = total_spend.unwrap_or_else(|| (limit_cents - remaining_cents).max(0.0));
-    let used_dollars = if limit_cents > 0.0 { Some(used_cents / 100.0) } else { None };
+    let used_dollars = if limit_cents > 0.0 {
+        Some(used_cents / 100.0)
+    } else {
+        None
+    };
 
     let plan_name = plan
         .and_then(|p| p.get("planInfo").or_else(|| p.get("plan_info")))
