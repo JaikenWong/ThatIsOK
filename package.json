@@ -1,6 +1,6 @@
 {
   "name": "thatisok",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Local approval and usage cockpit for Claude Code, Codex, Gemini, Cursor, MiniMax, and DeepSeek",
   "scripts": {
     "tauri": "tauri",
