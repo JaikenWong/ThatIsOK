@@ -1152,7 +1152,9 @@ checkUpdateButton.addEventListener('click', async () => {
         await checkForUpdates();
     } catch (error) {
         console.error('Update check failed', error);
-        renderRuntimeWarning('Update check failed');
+        const message = error && (error.message || String(error));
+        renderRuntimeWarning(message ? `Update check failed: ${message}` : 'Update check failed');
+        showUpdateBanner('error', message || 'Update check failed');
         checkUpdateButton.disabled = false;
         checkUpdateButton.innerText = 'Check Updates';
     }
