@@ -1165,7 +1165,9 @@ function renderHomeUsageFloor(accounts) {
 
 function renderActiveView() {
     const compact = Boolean(pendingIntervention);
+    island.classList.toggle('approvalView', compact);
     island.classList.toggle('agentsView', !compact && activeView === 'agents');
+    island.classList.toggle('usageView', !compact && activeView === 'usage');
     island.classList.toggle('panelView', !compact && ['home', 'agents', 'usage', 'rules'].includes(activeView));
     viewTabs.classList.toggle('hidden', compact);
     setupHealth.classList.toggle('hidden', compact || activeView !== 'home');
@@ -1623,13 +1625,16 @@ function scheduleExpandedHeightSync() {
         const expandedStyle = window.getComputedStyle(expandedContent);
         const gap = Number.parseFloat(expandedStyle.gap) || 0;
         const headerHeight = pillContent.offsetHeight || 0;
-        const actionBarHeight = actionBar && !actionBar.classList.contains('compactHidden') ? (actionBar.offsetHeight || 0) : 0;
+        const actionBarVisible = actionBar
+            && !actionBar.classList.contains('compactHidden')
+            && !actionBar.classList.contains('viewHidden');
+        const actionBarHeight = actionBarVisible ? (actionBar.offsetHeight || 0) : 0;
 
         // Measure all children of expandedContent
         let contentHeight = 0;
         const children = Array.from(expandedContent.children);
         children.forEach(child => {
-            if (child.classList.contains('hidden')) return;
+            if (child.classList.contains('hidden') || child.classList.contains('viewHidden')) return;
 
             if (child.id === 'accountsList') {
                 // Sum child card heights directly to avoid flex-inflated scrollHeight.
@@ -1651,20 +1656,18 @@ function scheduleExpandedHeightSync() {
         });
 
         // Add the container gap between visible children
-        const visibleChildrenCount = children.filter(c => !c.classList.contains('hidden')).length;
+        const visibleChildrenCount = children.filter(c => !c.classList.contains('hidden') && !c.classList.contains('viewHidden')).length;
         if (visibleChildrenCount > 1) {
             contentHeight += (visibleChildrenCount - 1) * gap;
         }
 
+        const compactApproval = Boolean(pendingIntervention);
         const fixedPanelViews = ['home', 'agents', 'usage', 'rules'];
-        const viewMinimum = fixedPanelViews.includes(activeView) ? 640 : 0;
+        const viewMinimum = compactApproval ? 245 : (fixedPanelViews.includes(activeView) ? 640 : 0);
         const naturalHeight = Math.ceil(topPadding + headerHeight + gap + contentHeight + bottomPadding + actionBarHeight);
-        const desiredHeight = Math.max(
-            viewMinimum,
-            fixedPanelViews.includes(activeView) ? Math.min(naturalHeight, viewMinimum) : naturalHeight
-        );
+        const desiredHeight = Math.max(viewMinimum, naturalHeight);
 
-        // Cap expanded panels close to work area while keeping the floating feel.
+        // Cap expanded panels close to work area while keeping approvals compact.
         const maxH = Math.round(window.screen.availHeight * 0.92);
         const clampedHeight = Math.min(desiredHeight, maxH);
 
@@ -1841,9 +1844,20 @@ jumpToTerminalButton.addEventListener('click', async (event) => {
 });
 
 function bindInterventionButton(button, decision) {
+    button.dataset.decision = decision;
     button.addEventListener('click', (event) => {
         event.preventDefault();
         event.stopPropagation();
+        const pointerHandledAt = Number(button.dataset.pointerHandledAt || 0);
+        if (Date.now() - pointerHandledAt < 350) {
+            return;
+        }
+        sendInterventionDecision(decision);
+    });
+    button.addEventListener('pointerup', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        button.dataset.pointerHandledAt = String(Date.now());
         sendInterventionDecision(decision);
     });
 }
@@ -1874,6 +1888,7 @@ window.addEventListener('keydown', (event) => {
 
 async function sendInterventionDecision(decision, answer = '') {
     if (!pendingIntervention) {
+        renderRuntimeWarning('No pending approval.');
         return;
     }
 
@@ -1883,27 +1898,59 @@ async function sendInterventionDecision(decision, answer = '') {
     }
 
     respondingInterventionId = requestId;
+    const activeButton = getInterventionDecisionButton(decision);
+    const originalText = activeButton ? activeButton.innerText : '';
     approveButton.disabled = true;
     approveAlwaysButton.disabled = true;
     denyButton.disabled = true;
+    if (activeButton) {
+        activeButton.innerText = getInterventionPendingLabel(decision);
+    }
     try {
         const ok = await ipcRenderer.invoke('intervention:respond', { decision, answer });
         if (ok && decision === 'approve_always') {
             loadApprovalRules();
         }
+        if (ok) {
+            renderIntervention(null);
+            return;
+        }
         if (!ok) {
+            renderRuntimeWarning('Approval already cleared or expired.');
             respondingInterventionId = null;
             approveButton.disabled = false;
             approveAlwaysButton.disabled = false;
             denyButton.disabled = false;
+            if (activeButton) {
+                activeButton.innerText = originalText;
+            }
         }
     } catch (err) {
         console.error('Intervention decision failed', err);
+        const message = err && (err.message || String(err));
+        renderRuntimeWarning(message ? `Approval failed: ${message}` : 'Approval failed.');
         respondingInterventionId = null;
         approveButton.disabled = false;
         approveAlwaysButton.disabled = false;
         denyButton.disabled = false;
+        if (activeButton) {
+            activeButton.innerText = originalText;
+        }
     }
+}
+
+function getInterventionDecisionButton(decision) {
+    if (decision === 'approve') return approveButton;
+    if (decision === 'approve_always') return approveAlwaysButton;
+    if (decision === 'deny') return denyButton;
+    return null;
+}
+
+function getInterventionPendingLabel(decision) {
+    if (decision === 'approve') return 'Approving...';
+    if (decision === 'approve_always') return 'Saving...';
+    if (decision === 'deny') return 'Denying...';
+    return 'Working...';
 }
 
 function renderShortcuts() {

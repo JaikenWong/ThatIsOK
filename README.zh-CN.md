@@ -59,7 +59,7 @@ ThatIsOK 是一个常驻桌面的**浮动小岛**。应用内显示为 **Agent G
 **macOS 用户注意：** 应用未经过 Apple 公证，安装后需运行一次：
 
 ```bash
-xattr -cr /Applications/ThatIsOK.app
+xattr -cr /Applications/Agent\ Gate.app
 ```
 
 或在 Finder 中右键点击 app → **打开**。
@@ -122,7 +122,7 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 
 - **同步间隔** — 展开悬浮岛，点击设置行的 `+/-`（5 / 10 / 15 / 30 / 60 分钟）
 - **Provider 显隐** — Usage 视图中的开关；关闭的 provider 不出现在 Home 和收起状态
-- **审批规则** — "Allow Rule / 允许规则" 会创建持久规则，保存在 `~/.config/ThatIsOK/approval-rules.json`
+- **审批规则** — "Allow Rule / 允许规则" 会创建持久规则，保存在 `~/.config/ThatIsOk/approval-rules.json`
 - **Hooks** — 可在托盘菜单安装/移除受管 hooks，用于临时关闭 Agent 拦截
 - **隐藏程序坞** — macOS：应用以辅助模式运行，仅显示托盘图标。Windows：默认不显示任务栏图标。
 

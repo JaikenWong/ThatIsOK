@@ -59,7 +59,7 @@ Download the latest `.dmg` (macOS) or `.exe` (Windows) from [Releases](https://g
 **macOS users:** the app is not Apple-notarized. After installing, run this once to bypass Gatekeeper:
 
 ```bash
-xattr -cr /Applications/ThatIsOK.app
+xattr -cr /Applications/Agent\ Gate.app
 ```
 
 Alternatively, right-click the app in Finder → **Open**.
@@ -122,7 +122,7 @@ Copy `src-tauri/plugins/thatisok-opencode.js` to `~/.config/opencode/plugins/`, 
 
 - **Sync interval** — expand the island, use `+/-` buttons in the settings row (5 / 10 / 15 / 30 / 60 minutes)
 - **Provider visibility** — toggle switches in the Usage tab; hidden providers are excluded from Home and collapsed meters
-- **Approval rules** — "Allow Rule" creates persistent rules stored in `~/.config/ThatIsOK/approval-rules.json`
+- **Approval rules** — "Allow Rule" creates persistent rules stored in `~/.config/ThatIsOk/approval-rules.json`
 - **Hooks** — install/remove managed hooks from the tray menu when you want to temporarily disable agent interception
 - **Hide from Dock** — macOS: app runs as accessory, tray-icon only. Windows: `skipTaskbar` by default.
 

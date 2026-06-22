@@ -491,26 +491,111 @@ async fn fetch_opencode_snapshot(
         _ => 0,
     };
 
-    let plan = if is_go { "Go Plan" } else { "Zen" };
+    let plan = if is_go { "OpenCode Go" } else { "OpenCode Zen" };
     let status = if model_count > 0 { "live" } else { "warn" };
     let message = if model_count > 0 {
-        format!("OpenCode {} · {} models available", plan, model_count)
+        format!("{plan} · {} models available", model_count)
     } else {
-        format!("OpenCode {} · API unreachable", plan)
+        format!("{plan} · API unreachable")
     };
 
     let mut lines = Vec::new();
+    let mut usage_source = "local_auth".to_string();
+    let mut dashboard_message: Option<String> = None;
+    let mut zen_balance_usd: Option<f64> = None;
 
-    if is_go {
+    if let Some(cookie_header) = read_opencode_go_cookie_header() {
+        eprintln!("[opencode] cookie configured; trying web usage first");
+        let cookie = normalize_cookie_header(&cookie_header);
+        let workspace_id = match cookie {
+            Some(ref c) => fetch_opencode_go_workspace_id(client, c).await,
+            None => None,
+        };
+        eprintln!(
+            "[opencode] workspace id {}",
+            workspace_id.as_deref().unwrap_or("<missing>")
+        );
+
+        if is_go {
+            // Go: try web dashboard first, then subscription API fallback
+            if let Some(ref c) = cookie {
+                if let Some(web_lines) = fetch_opencode_go_web_lines(client, c).await {
+                    eprintln!(
+                        "[opencode] using web dashboard usage lines={}",
+                        web_lines.len()
+                    );
+                    lines.extend(web_lines);
+                    usage_source = "opencode-go-web".to_string();
+                    dashboard_message = Some("official dashboard usage".to_string());
+                } else {
+                    eprintln!("[opencode] web dashboard usage unavailable");
+                }
+            }
+            if lines.is_empty() {
+                if let Some(ref wid) = workspace_id {
+                    eprintln!("[opencode] trying subscription usage fallback");
+                    if let Some(sub_lines) =
+                        fetch_opencode_subscription_lines(client, &cookie_header, wid).await
+                    {
+                        eprintln!(
+                            "[opencode] using subscription usage lines={}",
+                            sub_lines.len()
+                        );
+                        lines.extend(sub_lines);
+                        usage_source = "opencode-subscription".to_string();
+                        dashboard_message = Some("subscription usage".to_string());
+                    } else {
+                        eprintln!("[opencode] subscription usage unavailable");
+                    }
+                } else {
+                    eprintln!("[opencode] skip subscription usage: missing workspace id");
+                }
+            }
+            // Zen balance (concurrent-ish, runs after usage lines)
+            if let Some(ref wid) = workspace_id {
+                zen_balance_usd = fetch_opencode_zen_balance(client, &cookie_header, wid).await;
+            }
+        } else {
+            // Non-Go: subscription API only
+            if let Some(ref wid) = workspace_id {
+                eprintln!("[opencode] Zen account; trying subscription usage");
+                if let Some(sub_lines) =
+                    fetch_opencode_subscription_lines(client, &cookie_header, wid).await
+                {
+                    eprintln!(
+                        "[opencode] using subscription usage lines={}",
+                        sub_lines.len()
+                    );
+                    lines.extend(sub_lines);
+                    usage_source = "opencode-subscription".to_string();
+                    dashboard_message = Some("subscription usage".to_string());
+                } else {
+                    eprintln!("[opencode] subscription usage unavailable");
+                }
+            } else {
+                eprintln!("[opencode] skip subscription usage: missing workspace id");
+            }
+        }
+    } else {
+        eprintln!("[opencode] no web cookie configured; skipping web usage");
+    }
+
+    if lines.is_empty() && is_go {
         let db_path = home
             .join(".local")
             .join("share")
             .join("opencode")
             .join("opencode.db");
-        if db_path.exists() {
-            if let Some(go_lines) = build_opencode_go_lines(&db_path) {
-                lines.extend(go_lines);
-            }
+        if let Some(local_lines) = build_opencode_go_local_lines(&db_path) {
+            eprintln!(
+                "[opencode] using local SQLite usage lines={}",
+                local_lines.len()
+            );
+            lines.extend(local_lines);
+            usage_source = "opencode-go-local".to_string();
+            dashboard_message = Some("local history estimate".to_string());
+        } else {
+            eprintln!("[opencode] local SQLite usage unavailable");
         }
     }
 
@@ -530,16 +615,35 @@ async fn fetch_opencode_snapshot(
         }));
     }
 
+    if let Some(balance) = zen_balance_usd {
+        lines.push(json!({
+            "type": "text",
+            "label": "Zen Balance",
+            "value": format!("${:.2}", balance),
+            "subtitle": "current Zen credit"
+        }));
+    }
+
+    // Hint if no cookie configured
+    if usage_source == "local_auth" && is_go {
+        lines.push(json!({
+            "type": "text",
+            "label": "Cookie",
+            "value": "not set",
+            "subtitle": "set opencodeGoCookieHeader in defaults.json for accurate usage"
+        }));
+    }
+
     Some(json!({
         "accountId": account_id,
         "provider": "opencode",
         "label": label,
-        "balanceUsd": null,
+        "balanceUsd": zen_balance_usd,
         "creditTotalUsd": null,
         "creditUsedUsd": null,
         "status": status,
         "capturedAt": now_millis(),
-        "source": "local_auth",
+        "source": usage_source,
         "plan": plan,
         "lines": lines,
         "tokenUsage": {
@@ -558,14 +662,8 @@ async fn fetch_opencode_snapshot(
             "modelCount": model_count,
             "apiEndpoint": models_url,
         },
-        "message": message
+        "message": dashboard_message.unwrap_or(message)
     }))
-}
-
-#[derive(Default)]
-struct CostRow {
-    created_ms: i64,
-    cost: f64,
 }
 
 #[derive(Default)]
@@ -577,201 +675,751 @@ struct LocalTokenUsage {
     cache_write: u64,
 }
 
-fn build_opencode_go_lines(db_path: &Path) -> Option<Vec<Value>> {
-    let conn = Connection::open(db_path).ok()?;
-    let now_ms = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_millis() as i64;
+#[derive(Default)]
+struct CostRow {
+    created_ms: i64,
+    cost: f64,
+}
 
-    let mut costs = read_opencode_session_costs(&conn).unwrap_or_default();
-    if costs.is_empty() {
-        costs = read_opencode_message_costs(&conn, now_ms).unwrap_or_default();
+async fn fetch_opencode_go_web_lines(
+    client: &reqwest::Client,
+    cookie_header: &str,
+) -> Option<Vec<Value>> {
+    let cookie = normalize_cookie_header(cookie_header)?;
+    let workspace_id = fetch_opencode_go_workspace_id(client, &cookie).await?;
+    let url = format!("https://opencode.ai/workspace/{workspace_id}/go");
+    eprintln!("[opencode] fetch web dashboard url={url}");
+    let response = client
+        .get(&url)
+        .header("Cookie", cookie)
+        .header("User-Agent", OPENCODE_GO_USER_AGENT)
+        .header(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .send()
+        .await
+        .map_err(|error| eprintln!("[opencode] web dashboard request failed: {error}"))
+        .ok()?;
+    let status = response.status();
+    eprintln!("[opencode] web dashboard status={status}");
+    if !status.is_success() {
+        return None;
     }
-    drop(conn);
+    let text = response
+        .text()
+        .await
+        .map_err(|error| eprintln!("[opencode] web dashboard body failed: {error}"))
+        .ok()?;
+    eprintln!("[opencode] web dashboard body bytes={}", text.len());
+    let lines = build_opencode_go_web_lines(&text);
+    eprintln!(
+        "[opencode] web dashboard parse {}",
+        if lines.is_some() { "ok" } else { "failed" }
+    );
+    lines
+}
 
-    if costs.is_empty() {
+async fn fetch_opencode_go_workspace_id(
+    client: &reqwest::Client,
+    cookie_header: &str,
+) -> Option<String> {
+    if let Some(id) = read_opencode_go_workspace_override() {
+        eprintln!("[opencode] workspace id from override");
+        return Some(id);
+    }
+    let text = fetch_opencode_go_workspace_text(client, cookie_header, "GET", None).await?;
+    if let Some(id) = parse_opencode_go_workspace_id(&text) {
+        eprintln!("[opencode] workspace id from GET server response");
+        return Some(id);
+    }
+    let fallback =
+        fetch_opencode_go_workspace_text(client, cookie_header, "POST", Some("[]")).await?;
+    let id = parse_opencode_go_workspace_id(&fallback);
+    if id.is_some() {
+        eprintln!("[opencode] workspace id from POST server response");
+    } else {
+        eprintln!("[opencode] workspace id parse failed");
+    }
+    id
+}
+
+async fn fetch_opencode_server_text(
+    client: &reqwest::Client,
+    cookie_header: &str,
+    server_id: &str,
+    args: Option<&str>,
+    method: &str,
+    referer: &str,
+) -> Option<String> {
+    let request = if method == "POST" {
+        client.post("https://opencode.ai/_server")
+    } else {
+        client.get("https://opencode.ai/_server")
+    };
+    let request = request
+        .query(&[("id", server_id)])
+        .header("Cookie", cookie_header)
+        .header("X-Server-Id", server_id)
+        .header("X-Server-Instance", format!("server-fn:{}", now_millis()))
+        .header("User-Agent", OPENCODE_GO_USER_AGENT)
+        .header("Origin", "https://opencode.ai")
+        .header("Referer", referer)
+        .header(
+            "Accept",
+            "text/javascript, application/json;q=0.9, */*;q=0.8",
+        );
+    let request = if method == "POST" {
+        request
+            .header("Content-Type", "text/plain;charset=UTF-8")
+            .body(args.unwrap_or("[]").to_string())
+    } else {
+        request
+    };
+    request.send().await.ok()?.text().await.ok()
+}
+
+async fn fetch_opencode_go_workspace_text(
+    client: &reqwest::Client,
+    cookie_header: &str,
+    method: &str,
+    body: Option<&str>,
+) -> Option<String> {
+    fetch_opencode_server_text(
+        client,
+        cookie_header,
+        OPENCODE_GO_WORKSPACES_SERVER_ID,
+        body,
+        method,
+        "https://opencode.ai",
+    )
+    .await
+}
+
+fn build_opencode_go_web_lines(text: &str) -> Option<Vec<Value>> {
+    // Layer 1: try full JSON parse (CodexBar: parseSubscriptionJSON)
+    if let Some(lines) = parse_opencode_subscription_json(text) {
+        return Some(lines);
+    }
+    // Layer 2: regex fallback on raw text (CodexBar: parseSubscription regex)
+    parse_opencode_subscription_regex(text)
+}
+
+/// JSON-based parsing: try top-level dict, nested keys, recursive search, then candidate search
+fn parse_opencode_subscription_json(text: &str) -> Option<Vec<Value>> {
+    let val: Value = serde_json::from_str(text).ok()?;
+    let dict = val.as_object()?;
+
+    // Try direct usage dict
+    if let Some(lines) = parse_usage_dictionary(dict) {
+        return Some(lines);
+    }
+    // Try nested keys
+    for key in ["data", "result", "usage", "billing", "payload"] {
+        if let Some(nested) = dict.get(key).and_then(Value::as_object) {
+            if let Some(lines) = parse_usage_dictionary(nested) {
+                return Some(lines);
+            }
+        }
+    }
+    // Recursive nested search
+    if let Some(lines) = parse_usage_nested(dict, 0) {
+        return Some(lines);
+    }
+    // Candidate-based search
+    parse_usage_from_candidates(&val)
+}
+
+fn parse_usage_dictionary(dict: &serde_json::Map<String, Value>) -> Option<Vec<Value>> {
+    // Recurse into nested "usage" key
+    if let Some(usage) = dict.get("usage").and_then(Value::as_object) {
+        if let Some(lines) = parse_usage_dictionary(usage) {
+            return Some(lines);
+        }
+    }
+
+    let rolling_keys = [
+        "rollingUsage",
+        "rolling",
+        "rolling_usage",
+        "rollingWindow",
+        "rolling_window",
+    ];
+    let weekly_keys = [
+        "weeklyUsage",
+        "weekly",
+        "weekly_usage",
+        "weeklyWindow",
+        "weekly_window",
+    ];
+
+    let rolling = first_dict_from(dict, &rolling_keys);
+    let weekly = first_dict_from(dict, &weekly_keys);
+
+    let (Some(rolling), Some(weekly)) = (rolling, weekly) else {
+        return None;
+    };
+
+    build_lines_from_windows(&rolling, &weekly)
+}
+
+fn parse_usage_nested(dict: &serde_json::Map<String, Value>, depth: usize) -> Option<Vec<Value>> {
+    if depth > 3 {
+        return None;
+    }
+    let mut rolling: Option<&serde_json::Map<String, Value>> = None;
+    let mut weekly: Option<&serde_json::Map<String, Value>> = None;
+
+    for (key, value) in dict {
+        let sub = match value.as_object() {
+            Some(s) => s,
+            None => continue,
+        };
+        let lower = key.to_lowercase();
+        if lower.contains("rolling")
+            || lower.contains("hour")
+            || lower.contains("5h")
+            || lower.contains("5-hour")
+        {
+            rolling = Some(sub);
+        } else if lower.contains("weekly") || lower.contains("week") {
+            weekly = Some(sub);
+        }
+    }
+
+    if let (Some(r), Some(w)) = (rolling, weekly) {
+        if let Some(lines) = build_lines_from_windows(r, w) {
+            return Some(lines);
+        }
+    }
+
+    for value in dict.values() {
+        if let Some(sub) = value.as_object() {
+            if let Some(lines) = parse_usage_nested(sub, depth + 1) {
+                return Some(lines);
+            }
+        }
+    }
+    None
+}
+
+struct WindowCandidate {
+    percent: f64,
+    reset_in_sec: i64,
+    path_lower: String,
+}
+
+fn parse_usage_from_candidates(val: &Value) -> Option<Vec<Value>> {
+    let mut candidates: Vec<WindowCandidate> = Vec::new();
+    collect_window_candidates(val, &mut candidates, "");
+    if candidates.is_empty() {
         return None;
     }
 
-    costs.sort_by_key(|r| r.created_ms);
+    let rolling = candidates
+        .iter()
+        .find(|c| {
+            c.path_lower.contains("rolling")
+                || c.path_lower.contains("hour")
+                || c.path_lower.contains("5h")
+                || c.path_lower.contains("5-hour")
+        })
+        .or_else(|| candidates.first())?;
+    let weekly = candidates.iter().find(|c| {
+        (c.path_lower.contains("weekly") || c.path_lower.contains("week"))
+            && c.path_lower != rolling.path_lower
+    })?;
 
     let mut lines = Vec::new();
-
-    let sum_in_window = |start: i64, end: i64| -> f64 {
-        let total: f64 = costs
-            .iter()
-            .filter(|r| r.created_ms >= start && r.created_ms < end)
-            .map(|r| r.cost)
-            .sum();
-        (total * 10000.0).round() / 10000.0
-    };
-
-    fn clamp_pct(used: f64, limit: f64) -> f64 {
-        if limit <= 0.0 {
-            return 0.0;
-        }
-        ((used / limit * 100.0 * 10.0).round() / 10.0).clamp(0.0, 100.0)
-    }
-
-    fn start_of_utc_week(now_ms: i64) -> i64 {
-        let secs = now_ms / 1000;
-        let days_since_epoch = secs / 86400;
-        let day_of_week = ((days_since_epoch + 4) % 7 + 7) % 7;
-        let monday_start = (days_since_epoch - day_of_week) as i64 * 86400 * 1000;
-        monday_start
-    }
-
-    fn start_of_utc_month(now_ms: i64) -> i64 {
-        let secs = now_ms / 1000;
-        let dt = chrono::DateTime::from_timestamp(secs, 0).unwrap_or_else(chrono::Utc::now);
-        match chrono::Utc.with_ymd_and_hms(dt.year(), dt.month(), 1, 0, 0, 0) {
-            chrono::LocalResult::Single(t) => t.timestamp_millis(),
-            _ => now_ms,
-        }
-    }
-
-    // Compute monthly bounds anchored to the day-of-month of the earliest usage row
-    fn anchored_month(now_ms: i64, anchor_ms: i64) -> (i64, i64) {
-        let now_secs = now_ms / 1000;
-        let now_dt = chrono::DateTime::from_timestamp(now_secs, 0).unwrap_or_else(chrono::Utc::now);
-        let anchor_secs = anchor_ms / 1000;
-        let anchor_dt =
-            chrono::DateTime::from_timestamp(anchor_secs, 0).unwrap_or_else(chrono::Utc::now);
-        let day = anchor_dt.day();
-
-        let build = |year: i32, month: u32| -> Option<i64> {
-            let days_in_month = chrono::NaiveDate::from_ymd_opt(year, month, 1)
-                .and_then(|d| d.pred_opt())
-                .map(|d| d.day())
-                .unwrap_or(30);
-            let d = std::cmp::min(day, days_in_month);
-            match chrono::Utc.with_ymd_and_hms(year, month, d, 0, 0, 0) {
-                chrono::LocalResult::Single(t) => Some(t.timestamp_millis()),
-                _ => None,
-            }
-        };
-
-        let start = build(now_dt.year(), now_dt.month()).unwrap_or(now_ms);
-        let start = if start > now_ms {
-            let (y, m) = if now_dt.month() == 1 {
-                (now_dt.year() - 1, 12)
-            } else {
-                (now_dt.year(), now_dt.month() - 1)
-            };
-            build(y, m).unwrap_or(start)
-        } else {
-            start
-        };
-
-        let end = {
-            let (y, m) = if now_dt.month() == 12 {
-                (now_dt.year() + 1, 1)
-            } else {
-                (now_dt.year(), now_dt.month() + 1)
-            };
-            build(y, m).unwrap_or(start + 30 * 86400 * 1000)
-        };
-
-        (start, end)
-    }
-
-    let session_limit = 12.0;
-    let weekly_limit = 30.0;
-    let monthly_limit = 60.0;
-    let five_hours_ms: i64 = 5 * 60 * 60 * 1000;
-
-    let session_start = now_ms - five_hours_ms;
-    let session_cost = sum_in_window(session_start, now_ms);
-    let session_pct = clamp_pct(session_cost, session_limit);
-
-    let week_start = start_of_utc_week(now_ms);
-    let week_end = week_start + 7 * 24 * 60 * 60 * 1000;
-    let weekly_cost = sum_in_window(week_start, week_end);
-    let weekly_pct = clamp_pct(weekly_cost, weekly_limit);
-
-    let earliest_ms = costs.first().map(|r| r.created_ms).unwrap_or(now_ms);
-    let (month_start, month_end) = if earliest_ms < now_ms {
-        anchored_month(now_ms, earliest_ms)
-    } else {
-        let s = start_of_utc_month(now_ms);
-        let next = {
-            let secs = now_ms / 1000;
-            let dt = chrono::DateTime::from_timestamp(secs, 0).unwrap_or_else(chrono::Utc::now);
-            let (y, m) = if dt.month() == 12 {
-                (dt.year() + 1, 1)
-            } else {
-                (dt.year(), dt.month() + 1)
-            };
-            match chrono::Utc.with_ymd_and_hms(y, m, 1, 0, 0, 0) {
-                chrono::LocalResult::Single(t) => t.timestamp_millis(),
-                _ => s + 30 * 86400 * 1000,
-            }
-        };
-        (s, next)
-    };
-
-    let monthly_cost = sum_in_window(month_start, month_end);
-    let monthly_pct = clamp_pct(monthly_cost, monthly_limit);
-
-    let ms_to_iso = |ms: i64| -> String {
-        let secs = ms / 1000;
-        let millis = (ms % 1000) as u32;
-        chrono::DateTime::from_timestamp(secs, millis * 1_000_000)
-            .unwrap_or_else(chrono::Utc::now)
-            .to_rfc3339()
-    };
-
-    let session_reset: i64 = {
-        let oldest_in_window = costs
-            .iter()
-            .filter(|r| r.created_ms >= session_start && r.created_ms < now_ms)
-            .map(|r| r.created_ms)
-            .min()
-            .unwrap_or(now_ms);
-        oldest_in_window + five_hours_ms
-    };
-
-    lines.push(json!({
-        "type": "progress",
-        "label": "Session",
-        "used": (100.0 - session_pct).max(0.0),
-        "limit": 100.0,
-        "format": { "kind": "percent", "mode": "remaining" },
-        "subtitle": format!("${:.2} / ${:.0}", session_cost, session_limit),
-        "resetsAt": ms_to_iso(session_reset)
-    }));
-
-    lines.push(json!({
-        "type": "progress",
-        "label": "Weekly",
-        "used": (100.0 - weekly_pct).max(0.0),
-        "limit": 100.0,
-        "format": { "kind": "percent", "mode": "remaining" },
-        "subtitle": format!("${:.2} / ${:.0}", weekly_cost, weekly_limit),
-        "resetsAt": ms_to_iso(week_end)
-    }));
-
-    lines.push(json!({
-        "type": "progress",
-        "label": "Monthly",
-        "used": (100.0 - monthly_pct).max(0.0),
-        "limit": 100.0,
-        "format": { "kind": "percent", "mode": "remaining" },
-        "subtitle": format!("${:.2} / ${:.0}", monthly_cost, monthly_limit),
-        "resetsAt": ms_to_iso(month_end)
-    }));
-
+    lines.push(opencode_go_web_line(
+        "5-hour",
+        rolling.percent,
+        rolling.reset_in_sec,
+    ));
+    lines.push(opencode_go_web_line(
+        "Weekly",
+        weekly.percent,
+        weekly.reset_in_sec,
+    ));
     Some(lines)
 }
 
-fn read_opencode_session_costs(conn: &Connection) -> Option<Vec<CostRow>> {
-    let sql = "SELECT time_updated, cost FROM session WHERE cost > 0 AND json_valid(model) AND json_extract(model, '$.providerID') = 'opencode-go'";
+fn collect_window_candidates(val: &Value, out: &mut Vec<WindowCandidate>, path: &str) {
+    if let Some(dict) = val.as_object() {
+        if let Some((percent, reset)) = try_parse_window_dict(dict) {
+            out.push(WindowCandidate {
+                percent,
+                reset_in_sec: reset,
+                path_lower: path.to_lowercase(),
+            });
+        }
+        for (key, value) in dict {
+            let child_path = if path.is_empty() {
+                key.clone()
+            } else {
+                format!("{}/{}", path, key)
+            };
+            collect_window_candidates(value, out, &child_path);
+        }
+    } else if let Some(arr) = val.as_array() {
+        for (i, item) in arr.iter().enumerate() {
+            collect_window_candidates(item, out, &format!("{}/{}", path, i));
+        }
+    }
+}
+
+fn try_parse_window_dict(dict: &serde_json::Map<String, Value>) -> Option<(f64, i64)> {
+    let percent_keys = [
+        "usagePercent",
+        "usedPercent",
+        "percentUsed",
+        "percent",
+        "usage_percent",
+        "used_percent",
+        "utilization",
+        "utilizationPercent",
+        "utilization_percent",
+        "usage",
+    ];
+    let reset_in_keys = [
+        "resetInSec",
+        "resetInSeconds",
+        "resetSeconds",
+        "reset_sec",
+        "reset_in_sec",
+        "resetsInSec",
+        "resetsInSeconds",
+        "resetIn",
+        "resetSec",
+    ];
+    let reset_at_keys = [
+        "resetAt",
+        "resetsAt",
+        "reset_at",
+        "resets_at",
+        "nextReset",
+        "next_reset",
+        "renewAt",
+        "renew_at",
+    ];
+    let used_keys = ["used", "usage", "consumed", "count", "usedTokens"];
+    let limit_keys = ["limit", "total", "quota", "max", "cap", "tokenLimit"];
+
+    // Try percent keys
+    let mut percent: Option<f64> = None;
+    for key in &percent_keys {
+        if let Some(n) = dict.get(*key).and_then(|v| json_f64(v)) {
+            percent = Some(n);
+            break;
+        }
+    }
+
+    // Fallback: used/limit ratio
+    if percent.is_none() {
+        let used = used_keys
+            .iter()
+            .find_map(|k| dict.get(*k).and_then(|v| json_f64(v)));
+        let limit = limit_keys
+            .iter()
+            .find_map(|k| dict.get(*k).and_then(|v| json_f64(v)));
+        if let (Some(u), Some(l)) = (used, limit) {
+            if l > 0.0 {
+                percent = Some((u / l) * 100.0);
+            }
+        }
+    }
+
+    let mut resolved = percent?;
+    if (0.0..=1.0).contains(&resolved) {
+        resolved *= 100.0;
+    }
+    resolved = resolved.clamp(0.0, 100.0);
+
+    let mut reset: Option<i64> = None;
+    for key in &reset_in_keys {
+        if let Some(n) = dict.get(*key).and_then(|v| json_i64(v)) {
+            reset = Some(n);
+            break;
+        }
+    }
+    if reset.is_none() {
+        for key in &reset_at_keys {
+            if let Some(s) = dict.get(*key).and_then(Value::as_str) {
+                if let Some(secs) = reset_seconds_from_iso(s) {
+                    reset = Some(secs);
+                    break;
+                }
+            }
+        }
+    }
+
+    Some((resolved, reset.unwrap_or(0)))
+}
+
+fn json_f64(v: &Value) -> Option<f64> {
+    v.as_f64().or_else(|| {
+        v.as_str()
+            .and_then(|s| s.replace(',', "").parse::<f64>().ok())
+    })
+}
+
+fn json_i64(v: &Value) -> Option<i64> {
+    v.as_i64()
+        .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+}
+
+fn first_dict_from<'a>(
+    dict: &'a serde_json::Map<String, Value>,
+    keys: &[&str],
+) -> Option<&'a serde_json::Map<String, Value>> {
+    for key in keys {
+        if let Some(obj) = dict.get(*key).and_then(Value::as_object) {
+            return Some(obj);
+        }
+    }
+    None
+}
+
+fn build_lines_from_windows(
+    rolling: &serde_json::Map<String, Value>,
+    weekly: &serde_json::Map<String, Value>,
+) -> Option<Vec<Value>> {
+    let r = try_parse_window_dict(rolling)?;
+    let w = try_parse_window_dict(weekly)?;
+
+    let mut lines = Vec::new();
+    lines.push(opencode_go_web_line("5-hour", r.0, r.1));
+    lines.push(opencode_go_web_line("Weekly", w.0, w.1));
+    Some(lines)
+}
+
+/// Regex fallback: extract rollingUsage/weeklyUsage from raw text
+fn parse_opencode_subscription_regex(text: &str) -> Option<Vec<Value>> {
+    let rolling_pct = extract_double_regex(
+        r#"rollingUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)"#,
+        text,
+    )?;
+    let rolling_rst = extract_int_regex(r#"rollingUsage[^}]*?resetInSec\s*:\s*([0-9]+)"#, text)?;
+    let weekly_pct = extract_double_regex(
+        r#"weeklyUsage[^}]*?usagePercent\s*:\s*([0-9]+(?:\.[0-9]+)?)"#,
+        text,
+    )?;
+    let weekly_rst = extract_int_regex(r#"weeklyUsage[^}]*?resetInSec\s*:\s*([0-9]+)"#, text)?;
+
+    let mut lines = Vec::new();
+    lines.push(opencode_go_web_line("5-hour", rolling_pct, rolling_rst));
+    lines.push(opencode_go_web_line("Weekly", weekly_pct, weekly_rst));
+    Some(lines)
+}
+
+fn extract_double_regex(pattern: &str, text: &str) -> Option<f64> {
+    let re = regex::Regex::new(pattern).ok()?;
+    let caps = re.captures(text)?;
+    caps.get(1).and_then(|m| m.as_str().parse::<f64>().ok())
+}
+
+fn extract_int_regex(pattern: &str, text: &str) -> Option<i64> {
+    let re = regex::Regex::new(pattern).ok()?;
+    let caps = re.captures(text)?;
+    caps.get(1).and_then(|m| m.as_str().parse::<i64>().ok())
+}
+
+async fn fetch_opencode_subscription_lines(
+    client: &reqwest::Client,
+    cookie_header: &str,
+    workspace_id: &str,
+) -> Option<Vec<Value>> {
+    let referer = format!("https://opencode.ai/workspace/{workspace_id}/billing");
+    let args = format!("[\"{workspace_id}\"]");
+    let text = fetch_opencode_server_text(
+        client,
+        cookie_header,
+        OPENCODE_SUBSCRIPTION_SERVER_ID,
+        Some(&args),
+        "GET",
+        &referer,
+    )
+    .await;
+    let text = match text {
+        Some(t) => t,
+        None => {
+            fetch_opencode_server_text(
+                client,
+                cookie_header,
+                OPENCODE_SUBSCRIPTION_SERVER_ID,
+                Some(&args),
+                "POST",
+                &referer,
+            )
+            .await?
+        }
+    };
+    build_opencode_go_web_lines(&text)
+}
+
+async fn fetch_opencode_zen_balance(
+    client: &reqwest::Client,
+    cookie_header: &str,
+    workspace_id: &str,
+) -> Option<f64> {
+    let cookie = normalize_cookie_header(cookie_header)?;
+    // Try HTML page first
+    let url = format!("https://opencode.ai/workspace/{workspace_id}");
+    if let Ok(resp) = client
+        .get(&url)
+        .header("Cookie", &cookie)
+        .header("User-Agent", OPENCODE_GO_USER_AGENT)
+        .header(
+            "Accept",
+            "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+        )
+        .send()
+        .await
+    {
+        if let Ok(text) = resp.text().await {
+            if let Some(balance) = parse_opencode_zen_balance_from_text(&text) {
+                return Some(balance);
+            }
+        }
+    }
+    // Fallback: billing server
+    let args = format!("[\"{workspace_id}\"]");
+    let referer = format!("https://opencode.ai/workspace/{workspace_id}");
+    if let Some(text) = fetch_opencode_server_text(
+        client,
+        cookie_header,
+        OPENCODE_GO_BILLING_SERVER_ID,
+        Some(&args),
+        "GET",
+        &referer,
+    )
+    .await
+    {
+        if let Some(balance) = parse_opencode_zen_balance_from_billing(&text) {
+            return Some(balance);
+        }
+    }
+    None
+}
+
+fn parse_opencode_zen_balance_from_text(text: &str) -> Option<f64> {
+    // Try JSON recursive walk first
+    if let Ok(val) = serde_json::from_str::<Value>(text) {
+        if let Some(balance) = find_zen_balance_in_json(&val) {
+            return Some(balance);
+        }
+    }
+    // Regex: "current balance" / "zen balance" followed by $ amount
+    let re = regex::Regex::new(
+        r#"(?i)(?:current\s+balance|zen\s+balance|現在の残高)[^$]{0,80}\$\s*([0-9][0-9,]*(?:\.[0-9]+)?)"#,
+    )
+    .ok()?;
+    if let Some(caps) = re.captures(text) {
+        if let Some(m) = caps.get(1) {
+            if let Ok(v) = m.as_str().replace(',', "").parse::<f64>() {
+                return Some(v);
+            }
+        }
+    }
+    // Broader: "balance" within 120 chars of $ amount
+    let re2 =
+        regex::Regex::new(r#"(?i)(?:balance|残高)[\s\S]{0,120}?\$\s*([0-9][0-9,]*(?:\.[0-9]+)?)"#)
+            .ok()?;
+    if let Some(caps) = re2.captures(text) {
+        if let Some(m) = caps.get(1) {
+            if let Ok(v) = m.as_str().replace(',', "").parse::<f64>() {
+                return Some(v);
+            }
+        }
+    }
+    None
+}
+
+fn parse_opencode_zen_balance_from_billing(text: &str) -> Option<f64> {
+    // Try JSON: find customerID + balance, divide by 100_000_000
+    if let Ok(val) = serde_json::from_str::<Value>(text) {
+        if let Some(raw) = find_raw_billing_balance(&val) {
+            return Some(raw / 100_000_000.0);
+        }
+    }
+    // Regex fallback for RSC patterns
+    let has_customer = regex::Regex::new(r#"(?:\"customerID\"|customerID)"#)
+        .ok()?
+        .is_match(text);
+    if !has_customer {
+        return None;
+    }
+    let re = regex::Regex::new(
+        r#"(?:"balance"|balance)\s*:\s*(?:\$R\[\d+\]\s*=\s*)?(-?[0-9]+(?:\.[0-9]+)?)"#,
+    )
+    .ok()?;
+    if let Some(caps) = re.captures(text) {
+        if let Some(m) = caps.get(1) {
+            if let Ok(raw) = m.as_str().parse::<f64>() {
+                return Some(raw / 100_000_000.0);
+            }
+        }
+    }
+    None
+}
+
+fn find_zen_balance_in_json(val: &Value) -> Option<f64> {
+    match val {
+        Value::Object(map) => {
+            for (key, value) in map {
+                let normalized = key
+                    .chars()
+                    .filter(|c| c.is_alphanumeric())
+                    .collect::<String>()
+                    .to_lowercase();
+                if [
+                    "zenbalance",
+                    "zencurrentbalance",
+                    "currentbalance",
+                    "currentbalanceusd",
+                    "balanceusd",
+                    "usdbalance",
+                ]
+                .contains(&normalized.as_str())
+                {
+                    if let Some(n) = value.as_f64() {
+                        return Some(n);
+                    }
+                    if let Some(s) = value.as_str() {
+                        if let Ok(n) = s.replace(',', "").parse::<f64>() {
+                            return Some(n);
+                        }
+                    }
+                }
+                if let Some(found) = find_zen_balance_in_json(value) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Array(arr) => arr.iter().find_map(find_zen_balance_in_json),
+        _ => None,
+    }
+}
+
+fn find_raw_billing_balance(val: &Value) -> Option<f64> {
+    match val {
+        Value::Object(map) => {
+            if map.contains_key("balance") && map.contains_key("customerID") {
+                let cid = map.get("customerID").and_then(Value::as_str).unwrap_or("");
+                if !cid.is_empty() {
+                    if let Some(n) = map.get("balance").and_then(|v| v.as_f64()) {
+                        return Some(n);
+                    }
+                }
+            }
+            for value in map.values() {
+                if let Some(found) = find_raw_billing_balance(value) {
+                    return Some(found);
+                }
+            }
+            None
+        }
+        Value::Array(arr) => arr.iter().find_map(find_raw_billing_balance),
+        _ => None,
+    }
+}
+
+fn opencode_go_web_line(label: &str, used_percent: f64, reset_in_sec: i64) -> Value {
+    let remaining = (100.0 - used_percent).clamp(0.0, 100.0);
+    let reset_at_ms = chrono::Utc::now().timestamp_millis() + reset_in_sec.max(0) * 1000;
+    json!({
+        "type": "progress",
+        "label": label,
+        "used": remaining,
+        "limit": 100.0,
+        "format": { "kind": "percent", "mode": "remaining" },
+        "subtitle": format!("{:.0}% used", used_percent.clamp(0.0, 100.0)),
+        "resetsAt": millis_to_iso(reset_at_ms)
+    })
+}
+
+fn build_opencode_go_local_lines(db_path: &Path) -> Option<Vec<Value>> {
+    let rows = read_opencode_go_cost_rows(db_path)?;
+    if rows.is_empty() {
+        return None;
+    }
+
+    let now_ms = chrono::Utc::now().timestamp_millis();
+    let five_hours_ms: i64 = 5 * 60 * 60 * 1000;
+    let week_ms: i64 = 7 * 24 * 60 * 60 * 1000;
+    let session_start = now_ms - five_hours_ms;
+    let week_start = start_of_utc_week_ms(now_ms);
+    let week_end = week_start + week_ms;
+
+    let session_cost = sum_opencode_go_costs(&rows, session_start, now_ms);
+    let weekly_cost = sum_opencode_go_costs(&rows, week_start, week_end);
+
+    let session_reset = rows
+        .iter()
+        .filter(|row| row.created_ms >= session_start && row.created_ms < now_ms)
+        .map(|row| row.created_ms)
+        .min()
+        .unwrap_or(now_ms)
+        + five_hours_ms;
+
+    Some(vec![
+        opencode_go_local_line("5-hour", session_cost, 12.0, session_reset),
+        opencode_go_local_line("Weekly", weekly_cost, 30.0, week_end),
+    ])
+}
+
+fn read_opencode_go_cost_rows(db_path: &Path) -> Option<Vec<CostRow>> {
+    if !db_path.exists() {
+        return None;
+    }
+    let conn = Connection::open(db_path).ok()?;
+    let sql = if sqlite_has_table(&conn, "part") {
+        "WITH message_costs AS (
+            SELECT
+              id AS messageID,
+              CAST(COALESCE(json_extract(data, '$.time.created'), time_created) AS INTEGER) AS createdMs,
+              CAST(json_extract(data, '$.cost') AS REAL) AS cost
+            FROM message
+            WHERE json_valid(data)
+              AND json_extract(data, '$.providerID') = 'opencode-go'
+              AND json_extract(data, '$.role') = 'assistant'
+              AND json_type(data, '$.cost') IN ('integer', 'real')
+          )
+          SELECT createdMs, cost
+          FROM message_costs
+          UNION ALL
+          SELECT
+            CAST(COALESCE(json_extract(p.data, '$.time.created'), p.time_created, m.time_created) AS INTEGER) AS createdMs,
+            CAST(json_extract(p.data, '$.cost') AS REAL) AS cost
+          FROM part p
+          JOIN message m ON m.id = p.message_id
+          WHERE json_valid(p.data)
+            AND json_valid(m.data)
+            AND json_extract(p.data, '$.type') = 'step-finish'
+            AND json_type(p.data, '$.cost') IN ('integer', 'real')
+            AND json_extract(m.data, '$.providerID') = 'opencode-go'
+            AND json_extract(m.data, '$.role') = 'assistant'
+            AND NOT EXISTS (
+              SELECT 1
+              FROM message_costs
+              WHERE message_costs.messageID = p.message_id
+            )"
+    } else {
+        "SELECT
+            CAST(COALESCE(json_extract(data, '$.time.created'), time_created) AS INTEGER) AS createdMs,
+            CAST(json_extract(data, '$.cost') AS REAL) AS cost
+         FROM message
+         WHERE json_valid(data)
+           AND json_extract(data, '$.providerID') = 'opencode-go'
+           AND json_extract(data, '$.role') = 'assistant'
+           AND json_type(data, '$.cost') IN ('integer', 'real')"
+    };
     let mut stmt = conn.prepare(sql).ok()?;
     let rows = stmt
         .query_map([], |row| {
             Ok(CostRow {
-                created_ms: row.get::<_, i64>(0)?,
+                created_ms: row.get::<_, Option<i64>>(0)?.unwrap_or_default(),
                 cost: row.get::<_, f64>(1)?,
             })
         })
@@ -779,37 +1427,275 @@ fn read_opencode_session_costs(conn: &Connection) -> Option<Vec<CostRow>> {
     let mut costs = Vec::new();
     for row in rows {
         let Ok(item) = row else { continue };
-        if item.created_ms > 0 && item.cost > 0.0 {
+        if item.created_ms > 0 && item.cost >= 0.0 && item.cost.is_finite() {
             costs.push(item);
         }
     }
     Some(costs)
 }
 
-fn read_opencode_message_costs(conn: &Connection, now_ms: i64) -> Option<Vec<CostRow>> {
-    let sql = "SELECT data FROM message WHERE json_valid(data) AND json_extract(data, '$.providerID') = 'opencode-go' AND json_extract(data, '$.role') = 'assistant' AND json_type(data, '$.cost') IN ('integer', 'real')";
-    let mut stmt = conn.prepare(sql).ok()?;
-    let rows = stmt.query_map([], |row| row.get::<_, String>(0)).ok()?;
-    let mut costs = Vec::new();
-    for row in rows {
-        let Ok(data_str) = row else { continue };
-        let Ok(data) = serde_json::from_str::<Value>(&data_str) else {
-            continue;
-        };
-        let cost = data.get("cost").and_then(read_number_value).unwrap_or(0.0);
-        if cost <= 0.0 {
-            continue;
-        }
-        let created_ms = data
-            .get("time")
-            .and_then(|t| t.get("created"))
-            .and_then(read_number_value)
-            .map(|v| v as i64)
-            .unwrap_or(now_ms);
-        costs.push(CostRow { created_ms, cost });
-    }
-    Some(costs)
+fn sqlite_has_table(conn: &Connection, name: &str) -> bool {
+    conn.query_row(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1 LIMIT 1",
+        [name],
+        |_| Ok(()),
+    )
+    .is_ok()
 }
+
+fn opencode_go_local_line(label: &str, used_cost: f64, limit: f64, reset_at_ms: i64) -> Value {
+    let used_percent = opencode_go_percent(used_cost, limit);
+    let remaining = (100.0 - used_percent).clamp(0.0, 100.0);
+    json!({
+        "type": "progress",
+        "label": label,
+        "used": remaining,
+        "limit": 100.0,
+        "format": { "kind": "percent", "mode": "remaining" },
+        "subtitle": format!("${:.2} / ${:.0} local history", used_cost, limit),
+        "resetsAt": millis_to_iso(reset_at_ms)
+    })
+}
+
+fn opencode_go_percent(used: f64, limit: f64) -> f64 {
+    if !used.is_finite() || limit <= 0.0 {
+        return 0.0;
+    }
+    ((used / limit * 100.0) * 10.0).round() / 10.0
+}
+
+fn sum_opencode_go_costs(rows: &[CostRow], start_ms: i64, end_ms: i64) -> f64 {
+    rows.iter()
+        .filter(|row| row.created_ms >= start_ms && row.created_ms < end_ms)
+        .map(|row| row.cost)
+        .sum()
+}
+
+fn start_of_utc_week_ms(now_ms: i64) -> i64 {
+    let secs = now_ms / 1000;
+    let dt = chrono::DateTime::from_timestamp(secs, 0).unwrap_or_else(chrono::Utc::now);
+    let mut days_to_monday = dt.weekday().num_days_from_monday() as i64;
+    if days_to_monday < 0 {
+        days_to_monday = 0;
+    }
+    let date = dt.date_naive() - chrono::Duration::days(days_to_monday);
+    match chrono::Utc.with_ymd_and_hms(date.year(), date.month(), date.day(), 0, 0, 0) {
+        chrono::LocalResult::Single(t) => t.timestamp_millis(),
+        _ => now_ms,
+    }
+}
+
+fn reset_seconds_from_iso(value: &str) -> Option<i64> {
+    let parsed = chrono::DateTime::parse_from_rfc3339(value).ok()?;
+    Some(((parsed.timestamp_millis() - chrono::Utc::now().timestamp_millis()) / 1000).max(0))
+}
+
+fn parse_opencode_go_workspace_id(text: &str) -> Option<String> {
+    text.match_indices("wrk_").find_map(|(idx, _)| {
+        let id = text[idx..]
+            .chars()
+            .take_while(|c| c.is_ascii_alphanumeric() || *c == '_')
+            .collect::<String>();
+        (id.len() > 4).then_some(id)
+    })
+}
+
+fn normalize_cookie_header(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    if let Some(rest) = trimmed.strip_prefix("Cookie:") {
+        let cookie = rest.trim();
+        if !cookie.is_empty() {
+            return Some(cookie.to_string());
+        }
+    }
+    Some(trimmed.to_string())
+}
+
+fn read_opencode_go_cookie_header() -> Option<String> {
+    read_env_value(&[
+        "OPENCODEGO_COOKIE",
+        "OPENCODE_GO_COOKIE",
+        "OPENCODEGO_COOKIE_HEADER",
+        "OPENCODE_GO_COOKIE_HEADER",
+    ])
+    .or_else(read_config_opencodego_cookie)
+    .or_else(read_codexbar_legacy_opencodego_cookie)
+    .or_else(read_browser_opencodego_cookie)
+    .and_then(|cookie| normalize_cookie_header(&cookie))
+}
+
+fn read_opencode_go_workspace_override() -> Option<String> {
+    read_env_value(&["OPENCODEGO_WORKSPACE_ID", "OPENCODE_GO_WORKSPACE_ID"])
+        .or_else(read_config_opencodego_workspace_id)
+        .and_then(|raw| {
+            parse_opencode_go_workspace_id(&raw).or_else(|| {
+                let trimmed = raw.trim().to_string();
+                (trimmed.starts_with("wrk_") && trimmed.len() > 4).then_some(trimmed)
+            })
+        })
+}
+
+fn read_config_opencodego_cookie() -> Option<String> {
+    let defaults = read_json_file("defaults.json");
+    let opencode = defaults.get("providers")?.get("opencode")?;
+    opencode
+        .get("opencodeGoCookieHeader")
+        .or_else(|| opencode.get("opencodegoCookieHeader"))
+        .or_else(|| opencode.get("cookieHeader"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn read_codexbar_legacy_opencodego_cookie() -> Option<String> {
+    let path = dirs::home_dir()?
+        .join("Library")
+        .join("Application Support")
+        .join("CodexBar")
+        .join("opencodego-cookie.json");
+    let data = fs::read_to_string(path).ok()?;
+    let value = serde_json::from_str::<Value>(&data).ok()?;
+    let cookie = value
+        .get("cookieHeader")
+        .and_then(Value::as_str)
+        .or_else(|| value.get("cookie_header").and_then(Value::as_str))?;
+    eprintln!("[opencode] cookie from CodexBar legacy cache");
+    Some(cookie.to_string())
+}
+
+fn read_browser_opencodego_cookie() -> Option<String> {
+    read_chromium_opencodego_cookie()
+}
+
+fn read_chromium_opencodego_cookie() -> Option<String> {
+    let home = dirs::home_dir()?;
+    let chrome_root = home
+        .join("Library")
+        .join("Application Support")
+        .join("Google")
+        .join("Chrome");
+    let mut candidates = Vec::new();
+    collect_chromium_cookie_db_paths(&chrome_root, &mut candidates);
+
+    for path in candidates {
+        if let Some(cookie) = read_chromium_opencodego_cookie_from_db(&path) {
+            return Some(cookie);
+        }
+    }
+    None
+}
+
+fn collect_chromium_cookie_db_paths(root: &Path, out: &mut Vec<PathBuf>) {
+    if !root.exists() {
+        return;
+    }
+    if root.join("Cookies").exists() {
+        out.push(root.join("Cookies"));
+    }
+    let Ok(entries) = fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        let path = entry.path().join("Cookies");
+        if path.exists() {
+            out.push(path);
+        }
+    }
+}
+
+fn read_chromium_opencodego_cookie_from_db(db_path: &Path) -> Option<String> {
+    let temp_path = std::env::temp_dir().join(format!(
+        "thatisok-opencode-cookies-{}-{}.sqlite",
+        std::process::id(),
+        now_millis()
+    ));
+    fs::copy(db_path, &temp_path).ok()?;
+    let result = read_chromium_opencodego_cookie_from_copied_db(&temp_path, db_path);
+    let _ = fs::remove_file(temp_path);
+    result
+}
+
+fn read_chromium_opencodego_cookie_from_copied_db(
+    temp_path: &Path,
+    source_path: &Path,
+) -> Option<String> {
+    let conn = Connection::open(temp_path).ok()?;
+    let mut stmt = conn
+        .prepare(
+            "SELECT name, value, length(encrypted_value)
+             FROM cookies
+             WHERE host_key LIKE '%opencode.ai%'
+               AND name IN ('auth', '__Host-auth')",
+        )
+        .ok()?;
+    let rows = stmt
+        .query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, Option<i64>>(2)?.unwrap_or(0),
+            ))
+        })
+        .ok()?;
+
+    let mut cookies = Vec::new();
+    let mut encrypted_count = 0;
+    for row in rows.flatten() {
+        let (name, value, encrypted_len) = row;
+        if !value.is_empty() {
+            cookies.push(format!("{name}={value}"));
+        } else if encrypted_len > 0 {
+            encrypted_count += 1;
+        }
+    }
+
+    if !cookies.is_empty() {
+        eprintln!(
+            "[opencode] cookie from Chromium profile {} names={}",
+            source_path.display(),
+            cookies.len()
+        );
+        return Some(cookies.join("; "));
+    }
+    if encrypted_count > 0 {
+        eprintln!(
+            "[opencode] Chromium profile {} has encrypted OpenCode cookie(s); decryption not enabled",
+            source_path.display()
+        );
+    }
+    None
+}
+
+fn read_config_opencodego_workspace_id() -> Option<String> {
+    let defaults = read_json_file("defaults.json");
+    let opencode = defaults.get("providers")?.get("opencode")?;
+    opencode
+        .get("opencodeGoWorkspaceId")
+        .or_else(|| opencode.get("opencodegoWorkspaceId"))
+        .or_else(|| opencode.get("workspaceId"))
+        .or_else(|| opencode.get("workspaceID"))
+        .and_then(Value::as_str)
+        .map(str::to_string)
+}
+
+fn millis_to_iso(ms: i64) -> String {
+    let secs = ms / 1000;
+    let millis = (ms % 1000).max(0) as u32;
+    chrono::DateTime::from_timestamp(secs, millis * 1_000_000)
+        .unwrap_or_else(chrono::Utc::now)
+        .to_rfc3339()
+}
+
+const OPENCODE_GO_USER_AGENT: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/143.0.0.0 Safari/537.36";
+const OPENCODE_GO_WORKSPACES_SERVER_ID: &str =
+    "def39973159c7f0483d8793a822b8dbb10d067e12c65455fcb4608459ba0234f";
+const OPENCODE_SUBSCRIPTION_SERVER_ID: &str =
+    "7abeebee372f304e050aaaf92be863f4a86490e382f8c79db68fd94040d691b4";
+const OPENCODE_GO_BILLING_SERVER_ID: &str =
+    "c83b78a614689c38ebee981f9b39a8b377716db85c1fd7dbab604adc02d3313d";
 
 fn read_opencode_token_usage(db_path: &Path) -> Option<LocalTokenUsage> {
     if !db_path.exists() {
@@ -894,12 +1780,6 @@ pub(crate) fn refresh_opencode_local_usage(app: &AppHandle) {
         return;
     }
 
-    let Some(new_usage_lines) = build_opencode_go_lines(&db_path) else {
-        return; // No data — keep existing lines intact
-    };
-    if new_usage_lines.is_empty() {
-        return; // No usage lines computed — keep existing lines intact
-    }
     let state = app.state::<AppState>();
     let mut usage = match state.usage.lock() {
         Ok(usage) => usage,
@@ -918,21 +1798,25 @@ pub(crate) fn refresh_opencode_local_usage(app: &AppHandle) {
         return;
     };
 
-    let mut lines = account
-        .get("lines")
-        .and_then(Value::as_array)
-        .cloned()
-        .unwrap_or_default()
-        .into_iter()
-        .filter(|line| {
-            let label = line.get("label").and_then(Value::as_str).unwrap_or("");
-            !(line.get("type").and_then(Value::as_str) == Some("progress")
-                && matches!(label, "Session" | "Weekly" | "Monthly"))
-        })
-        .collect::<Vec<_>>();
+    if account.get("source").and_then(Value::as_str) == Some("opencode-go-local") {
+        if let Some(new_usage_lines) = build_opencode_go_local_lines(&db_path) {
+            let mut lines = account
+                .get("lines")
+                .and_then(Value::as_array)
+                .cloned()
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|line| {
+                    let label = line.get("label").and_then(Value::as_str).unwrap_or("");
+                    !(line.get("type").and_then(Value::as_str) == Some("progress")
+                        && matches!(label, "Session" | "5-hour" | "Weekly"))
+                })
+                .collect::<Vec<_>>();
+            lines.extend(new_usage_lines);
+            account["lines"] = Value::Array(lines);
+        }
+    }
 
-    lines.extend(new_usage_lines);
-    account["lines"] = Value::Array(lines);
     if let Some(token_usage) = read_opencode_token_usage(&db_path) {
         account["tokenUsage"] = json!({
             "exactInput": token_usage.input,
@@ -1612,14 +2496,22 @@ fn island_drag_end(app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
-async fn intervention_respond(app: AppHandle, decision: String, answer: Option<String>) -> bool {
+async fn intervention_respond(
+    app: AppHandle,
+    decision: Option<String>,
+    answer: Option<String>,
+) -> Result<bool, String> {
+    let decision = decision.unwrap_or_default();
+    if decision != "approve" && decision != "approve_always" && decision != "deny" {
+        return Err("invalid approval decision".to_string());
+    }
     let app_state = app.state::<AppState>();
     let mut pending = match app_state.intervention.try_lock() {
         Ok(pending) => pending,
-        Err(_) => return false,
+        Err(_) => return Err("approval state is busy".to_string()),
     };
     let Some(mut current) = pending.take() else {
-        return false;
+        return Ok(false);
     };
     let approved = decision == "approve" || decision == "approve_always";
     let allow_persistent = decision == "approve_always";
@@ -1642,7 +2534,7 @@ async fn intervention_respond(app: AppHandle, decision: String, answer: Option<S
     }
     let _ = app.emit("intervention-state", Option::<Value>::None);
     let _ = set_mode(&app, "pill");
-    true
+    Ok(true)
 }
 
 #[tauri::command]
@@ -2002,13 +2894,9 @@ pub fn run() {
                                 let _ = h.emit("update-status", json!({"status": "available", "version": update.version.to_string()}));
                             }
                             Ok(None) => {}
-                            Err(e) => {
-                                let _ = h.emit("update-status", json!({"status": "error", "message": e.to_string()}));
-                            }
+                            Err(_) => {}
                         },
-                        Err(e) => {
-                            let _ = h.emit("update-status", json!({"status": "error", "message": e.to_string()}));
-                        }
+                        Err(_) => {}
                     }
                 });
             }

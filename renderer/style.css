@@ -490,6 +490,15 @@ body, html {
     padding-right: 2px;
 }
 
+#island.approvalView #expandedContent {
+    flex: 0 0 auto;
+    overflow: visible;
+}
+
+#island.usageView #expandedContent {
+    overflow: hidden;
+}
+
 #expandedContent::-webkit-scrollbar {
     display: none;
 }
@@ -535,6 +544,14 @@ body, html {
 #island.panelView .accounts {
     max-height: 430px;
     overflow: auto;
+}
+
+#island.usageView .accounts {
+    flex: 1 1 auto;
+    max-height: none;
+    min-height: 0;
+    overflow: auto;
+    padding-bottom: 8px;
 }
 
 .accounts::-webkit-scrollbar {
@@ -1847,11 +1864,20 @@ body, html {
 }
 
 .interventionHint {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 6px;
     font-size: 10px;
     opacity: 0.5;
+}
+
+.hintItem {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 5px;
+    min-width: 0;
+    white-space: nowrap;
 }
 
 .hintKey {
@@ -1860,10 +1886,6 @@ body, html {
     padding: 2px 5px;
     border-radius: 4px;
     font-size: 9px;
-}
-
-.hintSep {
-    opacity: 0.3;
 }
 
 .interventionActions {
