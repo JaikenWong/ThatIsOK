@@ -1,3 +1,4 @@
+use rusqlite::{Connection, OpenFlags};
 use serde_json::{json, Value};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
@@ -82,17 +83,14 @@ fn read_cursor_db_token() -> Option<String> {
     if !db_path.exists() {
         return None;
     }
-    let output = Command::new("sqlite3")
-        .arg(db_path.to_string_lossy().as_ref())
-        .arg("SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'")
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
+    let conn = Connection::open_with_flags(&db_path, OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let token: String = conn
+        .query_row(
+            "SELECT value FROM ItemTable WHERE key = 'cursorAuth/accessToken'",
+            [],
+            |row| row.get(0),
+        )
         .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let token = String::from_utf8(output.stdout).ok()?;
     let trimmed = token.trim().to_string();
     if trimmed.is_empty() {
         None

@@ -4,9 +4,10 @@ use std::collections::HashMap;
 use crate::codex_provider::fetch_codex_snapshot;
 use crate::cursor_provider::fetch_cursor_snapshot;
 use crate::local_providers::{fetch_claude_snapshot, fetch_gemini_snapshot, fetch_kiro_snapshot};
+use crate::opencode_provider::fetch_opencode_snapshot;
 use crate::remote_providers::{fetch_deepseek_snapshot, fetch_minimax_snapshot};
 use crate::{
-    build_config_account, build_config_accounts, fetch_opencode_snapshot, read_json_file, AppState,
+    build_config_account, build_config_accounts, read_json_file, AppState,
     ProviderVisibility, SessionInfo,
 };
 

@@ -73,7 +73,7 @@ fn read_stdin_json() -> String {
         }
         let _ = tx.send(buffer);
     });
-    match rx.recv_timeout(std::time::Duration::from_secs(2)) {
+    match rx.recv_timeout(std::time::Duration::from_secs(10)) {
         Ok(buffer) => String::from_utf8_lossy(&buffer).to_string(),
         Err(_) => String::new(),
     }

@@ -60,9 +60,13 @@ pub(crate) async fn fetch_codex_snapshot(
             Err(err) => {
                 let is_expired = err.contains("401") || err.contains("expired");
                 if is_expired {
+                    usage_error = Some(err);
                     if let Some(refreshed) = refresh_codex_token(client, &auth, &auth_path).await {
                         match fetch_codex_usage_api(client, &refreshed, account_id_codex).await {
-                            Ok(data) => usage_data = Some(data),
+                            Ok(data) => {
+                                usage_data = Some(data);
+                                usage_error = None;
+                            }
                             Err(e) => usage_error = Some(e),
                         }
                     }
@@ -73,6 +77,9 @@ pub(crate) async fn fetch_codex_snapshot(
         }
     }
 
+    // Fall back to local session data when API data is unavailable.
+    // If a token exists but the API failed (non-auth error), still use local
+    // data but mark it as stale rather than hiding it entirely.
     if usage_data.is_none() {
         usage_data = read_codex_session_usage(&codex_home);
     }
@@ -80,13 +87,18 @@ pub(crate) async fn fetch_codex_snapshot(
     let effective_stale = is_stale && usage_data.is_none();
     let lines = build_codex_lines(usage_data.as_ref());
     let token_usage = read_codex_token_usage(&codex_home);
+    let api_failed = usage_error.is_some() && usage_data.is_none();
     let message = usage_error.unwrap_or_else(|| format!("plan {display_plan}"));
-    let status = if effective_stale {
+    let status = if api_failed {
+        "error"
+    } else if effective_stale {
         "stale"
     } else {
         "live-local"
     };
-    let plan = if effective_stale {
+    let plan = if api_failed {
+        "Codex API error"
+    } else if effective_stale {
         "Codex auth stale"
     } else {
         &display_plan

@@ -551,7 +551,7 @@ pub(crate) fn fetch_kiro_snapshot(account_id: &str, label: &str) -> Option<Value
         return None;
     }
 
-    let conn = rusqlite::Connection::open(&db_path).ok()?;
+    let conn = rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
     let mut stmt = conn
         .prepare("SELECT value FROM ItemTable WHERE key = 'kiro.kiroAgent' LIMIT 1")
         .ok()?;
