@@ -9,13 +9,9 @@ AgentIsOK is a **floating island** that lives on your desktop. It intercepts per
 </p>
 
 <p align="center">
-  <img src="assets/images/home.png" alt="AgentIsOK Home dashboard with provider status and token usage" width="270" />
-  <img src="assets/images/Usage.png" alt="AgentIsOK Usage view with provider toggles and quota cards" width="270" />
-</p>
-
-<p align="center">
-  <img src="assets/images/Agents.png" alt="AgentIsOK Agents view with live session detail" width="270" />
-  <img src="assets/images/rules.png" alt="AgentIsOK Rules view with filters and delete controls" width="270" />
+  <img src="assets/images/home.png" alt="AgentIsOK Home dashboard with provider status and token usage" width="31%" />
+  <img src="assets/images/usage.jpeg" alt="AgentIsOK Usage view with provider toggles and quota cards" width="31%" />
+  <img src="assets/images/rules.png" alt="AgentIsOK Rules view with filters and delete controls" width="31%" />
 </p>
 
 ## What it does
@@ -84,8 +80,7 @@ npm run tauri:build   # release build → src-tauri/target/release/bundle/
 | Mode | What you see |
 |------|-------------|
 | **Collapsed** | Logo + compact provider meters. Click to open the full panel. |
-| **Home** | Provider health, live agent count, inline token summaries, exact/estimated token totals, and token bars. |
-| **Agents** | Active agent sessions, timeline, payload detail, working directory, and terminal jump target. |
+| **Home** | Active agent sessions, provider health, token summaries, timeline detail, and terminal jump target. |
 | **Usage** | Provider visibility toggles, sync cadence, version/update check, quota cards, balances, and reset times. |
 | **Rules** | Searchable allow-rule list with source filters, command preview, delete icon, and undo. |
 
@@ -108,6 +103,7 @@ On startup, AgentIsOK writes managed entries into:
 
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
+- `~/.gemini/config/hooks.json` (Antigravity)
 
 When a tool-use permission is requested, the agent invokes the AgentIsOK binary with `--hook-source` and `--hook-event`. A TCP server on `127.0.0.1:45873` receives the event, displays the approval panel, and returns the decision.
 
