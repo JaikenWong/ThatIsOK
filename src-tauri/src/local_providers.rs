@@ -1,7 +1,7 @@
 use base64::Engine;
 use serde_json::{json, Value};
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use crate::{format_compact, now_millis, read_env_value, today_date_str};
 
@@ -289,6 +289,229 @@ fn entry_is_today(entry: &Value, today: &str) -> bool {
 
 pub(crate) fn fetch_gemini_snapshot(account_id: &str, label: &str) -> Option<Value> {
     let home = dirs::home_dir()?;
+    let antigravity_dirs = antigravity_data_dirs(&home);
+    if !antigravity_dirs.is_empty() {
+        return Some(fetch_antigravity_snapshot(
+            account_id,
+            label,
+            &antigravity_dirs,
+        ));
+    }
+    fetch_legacy_gemini_snapshot(account_id, label)
+}
+
+fn antigravity_data_dirs(home: &Path) -> Vec<PathBuf> {
+    [
+        home.join(".gemini").join("antigravity-cli"),
+        home.join(".gemini").join("antigravity"),
+        home.join(".gemini").join("antigravity-ide"),
+    ]
+    .into_iter()
+    .filter(|path| path.exists())
+    .collect()
+}
+
+fn fetch_antigravity_snapshot(account_id: &str, label: &str, dirs: &[PathBuf]) -> Value {
+    let stats = read_antigravity_today_stats(dirs);
+    let status = if stats.authenticated {
+        "live-local"
+    } else if stats.saw_login_error {
+        "stale"
+    } else {
+        "setup"
+    };
+    let model = if stats.latest_model.is_empty() {
+        "Auto".to_string()
+    } else {
+        stats.latest_model.clone()
+    };
+    let mut lines = vec![json!({
+        "type": "text",
+        "label": "Today",
+        "value": format!("{} calls", format_compact(stats.model_requests as f64)),
+        "subtitle": format!(
+            "{} sessions · {} quota checks",
+            format_compact(stats.session_count as f64),
+            format_compact(stats.quota_refreshes as f64)
+        )
+    })];
+    lines.push(json!({
+        "type": "text",
+        "label": "Model",
+        "value": model,
+        "subtitle": "Antigravity local logs"
+    }));
+
+    json!({
+        "accountId": account_id,
+        "provider": "gemini",
+        "label": label,
+        "status": status,
+        "capturedAt": now_millis(),
+        "source": "local_auth",
+        "plan": "Antigravity",
+        "balanceUsd": null,
+        "creditTotalUsd": null,
+        "creditUsedUsd": null,
+        "usage": {
+            "used": stats.model_requests,
+            "total": 0,
+            "remaining": 0,
+            "remainingPercent": 0,
+            "todayMessages": stats.model_requests,
+            "todaySessions": stats.session_count,
+            "todayTools": stats.tool_events,
+            "tokens": {
+                "input": 0,
+                "output": 0,
+            }
+        },
+        "tokenUsage": {
+            "exactInput": 0,
+            "exactOutput": 0,
+            "exactTotal": 0,
+            "estimatedInput": 0,
+            "estimatedOutput": 0,
+            "estimatedTotal": 0,
+            "source": "antigravity-local"
+        },
+        "lines": lines,
+        "meta": {
+            "isStale": status != "live-local",
+            "todayMessages": stats.model_requests,
+            "todaySessions": stats.session_count,
+            "todayTools": stats.tool_events,
+            "modelRequests": stats.model_requests,
+            "quotaRefreshes": stats.quota_refreshes,
+            "latestModel": stats.latest_model,
+        },
+        "message": if status == "live-local" {
+            "Antigravity local usage stats"
+        } else {
+            "Antigravity login required or stale"
+        }
+    })
+}
+
+struct AntigravityTodayStats {
+    session_count: u32,
+    model_requests: u32,
+    quota_refreshes: u32,
+    tool_events: u32,
+    authenticated: bool,
+    saw_login_error: bool,
+    latest_model: String,
+}
+
+fn read_antigravity_today_stats(dirs: &[PathBuf]) -> AntigravityTodayStats {
+    let today_ymd = today_date_str();
+    let today = today_ymd.replace('-', "");
+    let mut stats = AntigravityTodayStats {
+        session_count: 0,
+        model_requests: 0,
+        quota_refreshes: 0,
+        tool_events: 0,
+        authenticated: false,
+        saw_login_error: false,
+        latest_model: String::new(),
+    };
+
+    for dir in dirs {
+        let log_dir = dir.join("log");
+        if log_dir.exists() {
+            let Ok(files) = fs::read_dir(&log_dir) else {
+                continue;
+            };
+            for file in files.flatten() {
+                let path = file.path();
+                if path.extension().and_then(|ext| ext.to_str()) != Some("log") {
+                    continue;
+                }
+                let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+                    continue;
+                };
+                if !name.contains(&today) {
+                    continue;
+                }
+                stats.session_count += 1;
+                read_antigravity_log_file(&path, &mut stats);
+            }
+            continue;
+        }
+
+        let conversations_dir = dir.join("conversations");
+        if conversations_dir.exists() {
+            stats.session_count +=
+                count_today_files_in_dir(&conversations_dir, &["db", "pb"], &today_ymd) as u32;
+        }
+    }
+
+    stats
+}
+
+fn read_antigravity_log_file(path: &Path, stats: &mut AntigravityTodayStats) {
+    let Ok(content) = fs::read_to_string(path) else {
+        return;
+    };
+    for line in content.lines() {
+        if line.contains("v1internal:loadCodeAssist") {
+            stats.model_requests += 1;
+        }
+        if line.contains("quotaRefreshLoop: starting reload")
+            || line.contains("retrieveUserQuotaSummary")
+        {
+            stats.quota_refreshes += 1;
+        }
+        if line.contains("PreToolUse") || line.contains("PostToolUse") {
+            stats.tool_events += 1;
+        }
+        if line.contains("authenticated successfully") || line.contains("authenticated via keyring")
+        {
+            stats.authenticated = true;
+        }
+        if line.contains("You are not logged into Antigravity") {
+            stats.saw_login_error = true;
+        }
+        if let Some(model) = extract_quoted_value(line, "label=\"") {
+            stats.latest_model = model;
+        }
+    }
+}
+
+fn extract_quoted_value(line: &str, marker: &str) -> Option<String> {
+    let start = line.find(marker)? + marker.len();
+    let rest = &line[start..];
+    let end = rest.find('"')?;
+    Some(rest[..end].to_string())
+}
+
+fn count_today_files_in_dir(dir: &Path, extensions: &[&str], today: &str) -> usize {
+    let Ok(files) = fs::read_dir(dir) else {
+        return 0;
+    };
+    files
+        .flatten()
+        .filter(|file| {
+            let path = file.path();
+            path.is_file()
+                && path
+                    .extension()
+                    .and_then(|ext| ext.to_str())
+                    .is_some_and(|ext| extensions.contains(&ext))
+                && file
+                    .metadata()
+                    .ok()
+                    .and_then(|meta| meta.modified().ok())
+                    .is_some_and(|modified| {
+                        let modified = chrono::DateTime::<chrono::Utc>::from(modified);
+                        modified.format("%Y-%m-%d").to_string() == today
+                    })
+        })
+        .count()
+}
+
+fn fetch_legacy_gemini_snapshot(account_id: &str, label: &str) -> Option<Value> {
+    let home = dirs::home_dir()?;
     let gemini_dir = home.join(".gemini");
     if !gemini_dir.exists() {
         return None;
@@ -325,9 +548,9 @@ pub(crate) fn fetch_gemini_snapshot(account_id: &str, label: &str) -> Option<Val
     };
 
     let plan_name = if daily_limit >= 1000 {
-        "Gemini Code Assist"
+        "Gemini Code Assist (legacy)"
     } else {
-        "Gemini CLI"
+        "Gemini CLI (legacy)"
     };
 
     let mut lines = Vec::new();
@@ -551,7 +774,9 @@ pub(crate) fn fetch_kiro_snapshot(account_id: &str, label: &str) -> Option<Value
         return None;
     }
 
-    let conn = rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY).ok()?;
+    let conn =
+        rusqlite::Connection::open_with_flags(&db_path, rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY)
+            .ok()?;
     let mut stmt = conn
         .prepare("SELECT value FROM ItemTable WHERE key = 'kiro.kiroAgent' LIMIT 1")
         .ok()?;

@@ -17,7 +17,7 @@
       "currency": "USD"
     },
     "gemini": {
-      "name": "Gemini",
+      "name": "Antigravity",
       "currency": "USD"
     },
     "deepseek": {
@@ -61,7 +61,7 @@
     {
       "id": "gemini-local",
       "provider": "gemini",
-      "label": "Gemini",
+      "label": "Antigravity",
       "billingMode": "free_tier"
     },
     {

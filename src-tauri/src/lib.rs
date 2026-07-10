@@ -695,6 +695,7 @@ fn nested_tool_input(payload: &Value) -> Option<&serde_json::Map<String, Value>>
         .or_else(|| payload.get("input"))
         .or_else(|| payload.get("parameters"))
         .or_else(|| payload.get("arguments"))
+        .or_else(|| payload.get("toolCall").and_then(|tool| tool.get("args")))
         .and_then(Value::as_object)
 }
 
@@ -871,13 +872,22 @@ fn build_intervention(
         .get("tool_name")
         .or_else(|| payload.get("toolName"))
         .or_else(|| payload.get("tool"))
+        .or_else(|| payload.get("toolCall").and_then(|tool| tool.get("name")))
         .and_then(Value::as_str)
         .unwrap_or("permission")
         .to_string();
-    let command = string_field(&payload, &["command", "cmd"]);
+    let command = string_field(&payload, &["command", "cmd", "CommandLine", "commandLine"]);
     let file_path = string_field(
         &payload,
-        &["file_path", "filePath", "path", "notebook_path"],
+        &[
+            "file_path",
+            "filePath",
+            "path",
+            "Path",
+            "FilePath",
+            "DirectoryPath",
+            "notebook_path",
+        ],
     );
 
     let explanation = payload
@@ -918,12 +928,11 @@ fn build_intervention(
             }
         })
         .unwrap_or_else(|| "Confirm this action".to_string());
-    let source_label = if source == "codex" {
-        "Codex"
-    } else if source == "claude" {
-        "Claude"
-    } else {
-        "Agent"
+    let source_label = match source {
+        "codex" => "Codex",
+        "claude" => "Claude",
+        "antigravity" | "gemini" => "Antigravity",
+        _ => "Agent",
     };
     let prompt_text = payload
         .get("prompt")
@@ -1321,7 +1330,11 @@ async fn jump_to_terminal(target: Value) -> Result<bool, String> {
                         end repeat\n\
                     end repeat\n\
                 end tell",
-                if !tty.is_empty() { tty.clone() } else { applescript_string(cwd) }
+                if !tty.is_empty() {
+                    tty.clone()
+                } else {
+                    applescript_string(cwd)
+                }
             ),
             _ => {
                 let app_name = terminal_app;

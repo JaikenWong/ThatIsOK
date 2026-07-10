@@ -20,7 +20,11 @@ function getArg(name) {
 const source = getArg("--hook-source") || "unknown";
 const event = getArg("--hook-event") || "unknown";
 const eventLower = event.toLowerCase();
-const isPermission = eventLower === "permissionrequest" || eventLower === "permission_request";
+const isPermission =
+  eventLower === "permissionrequest" ||
+  eventLower === "permission_request" ||
+  (source === "antigravity" &&
+    (eventLower === "pretooluse" || eventLower === "pre_tool_use"));
 
 let raw = "";
 let started = false;
@@ -75,6 +79,8 @@ function send(payload) {
     } catch {}
     if (line && isPermission) {
       writePermissionOutput(line);
+    } else if (source === "antigravity") {
+      writeAntigravityDefaultOutput();
     }
     process.exit(0);
   }
@@ -94,14 +100,27 @@ function writePermissionOutput(line) {
   try {
     res = JSON.parse(line);
   } catch {
+    writeAntigravityDefaultOutput();
     return;
   }
-  if (res.requiresDecision !== true) return;
+  if (res.requiresDecision !== true) {
+    if (source === "antigravity") process.stdout.write(JSON.stringify({ decision: "allow" }));
+    return;
+  }
   if (res.isQuestion === true) {
     writeQuestionOutput(res);
     return;
   }
   const approved = res.approved === true;
+  if (source === "antigravity") {
+    process.stdout.write(
+      JSON.stringify({
+        decision: approved ? "allow" : "deny",
+        reason: approved ? "" : "Denied from AgentIsOK",
+      }),
+    );
+    return;
+  }
   const decision = { behavior: approved ? "allow" : "deny" };
   if (!approved) {
     decision.message = "Denied from AgentIsOK";
@@ -124,6 +143,10 @@ function writeQuestionOutput(res) {
     process.stdout.write(JSON.stringify({ type: "answer", text: answer }));
     return;
   }
+  if (source === "antigravity") {
+    process.stdout.write(JSON.stringify({ decision: "allow", reason: answer }));
+    return;
+  }
   const question =
     (typeof res.question === "string" ? res.question : "").trim() || "answer";
   const decision = { behavior: "allow" };
@@ -138,4 +161,22 @@ function writeQuestionOutput(res) {
   const out = { continue: true, hookSpecificOutput };
   if (source === "claude") out.suppressOutput = true;
   process.stdout.write(JSON.stringify(out));
+}
+
+function writeAntigravityDefaultOutput() {
+  if (source !== "antigravity") return;
+  if (isPermission) {
+    process.stdout.write(
+      JSON.stringify({
+        decision: "ask",
+        reason: "AgentIsOK is not reachable.",
+      }),
+    );
+    return;
+  }
+  if (eventLower === "stop") {
+    process.stdout.write(JSON.stringify({ decision: "allow" }));
+    return;
+  }
+  process.stdout.write(JSON.stringify({}));
 }

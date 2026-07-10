@@ -22,7 +22,7 @@ Record these before testing:
 - Windows version
 - architecture: `x64` / `arm64`
 - shell used for build: `PowerShell` / `cmd`
-- whether Codex / Claude / Cursor / Gemini / MiniMax / DeepSeek credentials already exist
+- whether Codex / Claude / Cursor / Antigravity / MiniMax / DeepSeek credentials already exist
 
 ## Build
 
@@ -231,7 +231,7 @@ Providers to verify when credentials exist:
 - Claude
 - Cursor
 - MiniMax
-- Gemini
+- Antigravity
 - DeepSeek
 - OpenCode if configured
 

@@ -51,7 +51,7 @@ const PROVIDER_SETUP_TIPS = {
     claude: 'Requires Claude Code login and hooks. Restart Claude Code after enabling.',
     cursor: 'Requires Cursor local login before usage can be synced.',
     minimax: 'Requires MINIMAX_API_KEY or MINIMAX_CN_API_KEY in environment, then Sync.',
-    gemini: 'Requires Gemini local login before usage can be synced.',
+    gemini: 'Requires Antigravity login before usage can be synced.',
     deepseek: 'Requires DEEPSEEK_API_KEY in project .env or environment, then restart.',
     opencode: 'Install AgentIsOK plugin: copy agentisok-opencode.js to ~/.config/opencode/plugins/, update config.json.',
     kiro: 'Requires Kiro (Amazon Q) installed and signed in. Open Kiro dashboard once to populate usage data.'
@@ -644,7 +644,7 @@ function getProviderShortLabel(account) {
     const map = {
         codex: 'C',
         claude: 'A',
-        gemini: 'G',
+        gemini: 'A',
         minimax: 'M',
         cursor: 'R',
         deepseek: 'D',
@@ -658,7 +658,7 @@ function getProviderShortLabelByKey(provider, fallbackLabel = '?') {
     const map = {
         codex: 'C',
         claude: 'A',
-        gemini: 'G',
+        gemini: 'A',
         minimax: 'M',
         cursor: 'R',
         deepseek: 'D',
@@ -1677,7 +1677,7 @@ function formatSource(source) {
         return 'Codex';
     }
     if (source === 'gemini') {
-        return 'Gemini';
+        return 'Antigravity';
     }
     if (source === 'minimax') {
         return 'MiniMax';

@@ -1,7 +1,7 @@
 {
   "name": "agentisok",
   "version": "1.0.8",
-  "description": "Local approval and usage cockpit for Claude Code, Codex, Gemini, Cursor, MiniMax, and DeepSeek",
+  "description": "Local approval and usage cockpit for Claude Code, Codex, Antigravity, Cursor, MiniMax, and DeepSeek",
   "scripts": {
     "tauri": "tauri",
     "tauri:dev": "tauri dev",

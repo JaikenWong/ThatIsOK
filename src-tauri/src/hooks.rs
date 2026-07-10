@@ -15,6 +15,8 @@ use crate::{
     SessionEvent, SessionInfo, ALL_HOOK_EVENTS, CLAUDE_HOOK_EVENTS, CODEX_HOOK_EVENTS, MANAGED_KEY,
 };
 
+const ANTIGRAVITY_HOOK_NAME: &str = "agentisok";
+
 pub fn run_hook_bridge_from_args() -> bool {
     let args = env::args().collect::<Vec<_>>();
     if args.iter().any(|arg| arg == "--uninstall-hooks") {
@@ -116,6 +118,13 @@ pub(crate) fn inject_agent_hooks(app: &AppHandle) {
             "Claude hook setup failed. Check local permissions and Claude settings.",
         );
     }
+    if let Err(error) = inject_antigravity_hooks(&exe_path, bridge_path.as_deref()) {
+        eprintln!("failed to install Antigravity hooks: {error}");
+        emit_runtime_warning(
+            app,
+            "Antigravity hook setup failed. Check ~/.gemini/config/hooks.json.",
+        );
+    }
     if let Err(error) = inject_opencode_hooks() {
         eprintln!("failed to install OpenCode hooks: {error}");
         emit_runtime_warning(
@@ -152,6 +161,9 @@ pub(crate) fn remove_agent_hooks() -> Result<(), String> {
     }
     if let Err(error) = remove_opencode_plugin(&home) {
         errors.push(format!("OpenCode: {error}"));
+    }
+    if let Err(error) = remove_antigravity_hooks(&home) {
+        errors.push(format!("Antigravity: {error}"));
     }
     if let Err(error) = remove_bridge_script() {
         errors.push(format!("bridge: {error}"));
@@ -220,6 +232,22 @@ fn remove_managed_hooks_from_file(path: &Path) -> Result<(), String> {
     fs::write(path, format!("{content}\n")).map_err(|err| err.to_string())
 }
 
+fn remove_antigravity_hooks(home: &Path) -> Result<(), String> {
+    let path = home.join(".gemini").join("config").join("hooks.json");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return Ok(());
+    };
+    let mut config = serde_json::from_str::<Value>(&content).map_err(|err| err.to_string())?;
+    let Some(hooks) = config.as_object_mut() else {
+        return Ok(());
+    };
+    hooks.retain(|name, value| {
+        name != ANTIGRAVITY_HOOK_NAME && name != "thatisok" && !is_managed_hook_value(value)
+    });
+    let content = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
+    fs::write(path, format!("{content}\n")).map_err(|err| err.to_string())
+}
+
 fn remove_opencode_plugin(home: &Path) -> Result<(), String> {
     let plugins_dir = home.join(".config").join("opencode").join("plugins");
     for plugin_name in ["agentisok.js", "thatisok.js"] {
@@ -279,12 +307,20 @@ fn run_hook_bridge(source: &str, event_name: &str, input: &str) -> Result<(), St
     let addr: std::net::SocketAddr = "127.0.0.1:45873"
         .parse()
         .map_err(|e: std::net::AddrParseError| e.to_string())?;
-    let mut stream = std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3))
-        .map_err(|err| err.to_string())?;
+    let mut stream =
+        match std::net::TcpStream::connect_timeout(&addr, std::time::Duration::from_secs(3)) {
+            Ok(stream) => stream,
+            Err(error) => {
+                if write_antigravity_default_output(source, event_name)? {
+                    return Ok(());
+                }
+                return Err(error.to_string());
+            }
+        };
     stream
         .write_all(format!("{payload}\n").as_bytes())
         .map_err(|err| err.to_string())?;
-    let read_timeout = if event_name.eq_ignore_ascii_case("PermissionRequest") {
+    let read_timeout = if is_decision_event(source, event_name) {
         1_800
     } else {
         5
@@ -296,14 +332,63 @@ fn run_hook_bridge(source: &str, event_name: &str, input: &str) -> Result<(), St
     let mut line = String::new();
     reader.read_line(&mut line).map_err(|err| err.to_string())?;
     let response = serde_json::from_str::<Value>(&line).map_err(|err| err.to_string())?;
-    if event_name.eq_ignore_ascii_case("PermissionRequest") {
+    if is_decision_event(source, event_name) {
         write_permission_output(source, &response)?;
+    } else if source == "antigravity" {
+        write_antigravity_non_decision_output(event_name)?;
     }
     Ok(())
 }
 
+fn is_decision_event(source: &str, event_name: &str) -> bool {
+    let event_lower = event_name.to_lowercase();
+    matches!(
+        event_lower.as_str(),
+        "permissionrequest" | "permission_request"
+    ) || (source == "antigravity" && matches!(event_lower.as_str(), "pretooluse" | "pre_tool_use"))
+}
+
+fn write_antigravity_default_output(source: &str, event_name: &str) -> Result<bool, String> {
+    if source != "antigravity" {
+        return Ok(false);
+    }
+    let output = if is_decision_event(source, event_name) {
+        json!({
+            "decision": "ask",
+            "reason": "AgentIsOK is not reachable."
+        })
+    } else {
+        antigravity_non_decision_output(event_name)
+    };
+    println!(
+        "{}",
+        serde_json::to_string(&output).map_err(|err| err.to_string())?
+    );
+    Ok(true)
+}
+
+fn write_antigravity_non_decision_output(event_name: &str) -> Result<(), String> {
+    let output = antigravity_non_decision_output(event_name);
+    println!(
+        "{}",
+        serde_json::to_string(&output).map_err(|err| err.to_string())?
+    );
+    Ok(())
+}
+
+fn antigravity_non_decision_output(event_name: &str) -> Value {
+    if event_name.eq_ignore_ascii_case("Stop") {
+        json!({ "decision": "allow" })
+    } else {
+        json!({})
+    }
+}
+
 fn write_permission_output(source: &str, response: &Value) -> Result<(), String> {
     if response.get("requiresDecision").and_then(Value::as_bool) != Some(true) {
+        if source == "antigravity" {
+            println!("{}", json!({ "decision": "allow" }));
+        }
         return Ok(());
     }
     if response.get("isQuestion").and_then(Value::as_bool) == Some(true) {
@@ -314,6 +399,17 @@ fn write_permission_output(source: &str, response: &Value) -> Result<(), String>
         .get("approved")
         .and_then(Value::as_bool)
         .unwrap_or(false);
+    if source == "antigravity" {
+        let output = json!({
+            "decision": if approved { "allow" } else { "deny" },
+            "reason": if approved { "" } else { "Denied from AgentIsOK" }
+        });
+        println!(
+            "{}",
+            serde_json::to_string(&output).map_err(|err| err.to_string())?
+        );
+        return Ok(());
+    }
     let mut decision = serde_json::Map::new();
     decision.insert(
         "behavior".to_string(),
@@ -354,6 +450,11 @@ fn write_question_output(source: &str, response: &Value) -> Result<(), String> {
         json!({
             "type": "answer",
             "text": answer
+        })
+    } else if source == "antigravity" {
+        json!({
+            "decision": "allow",
+            "reason": answer
         })
     } else {
         let question = response
@@ -497,6 +598,57 @@ fn inject_claude_hooks(exe_path: &Path, bridge_path: Option<&Path>) -> Result<()
     Ok(())
 }
 
+fn inject_antigravity_hooks(exe_path: &Path, bridge_path: Option<&Path>) -> Result<(), String> {
+    let Some(home) = dirs::home_dir() else {
+        return Err("home directory not available".to_string());
+    };
+    let hooks_path = home.join(".gemini").join("config").join("hooks.json");
+    let mut config = fs::read_to_string(&hooks_path)
+        .ok()
+        .and_then(|content| serde_json::from_str::<Value>(&content).ok())
+        .unwrap_or_else(|| json!({}));
+    if !config.is_object() {
+        config = json!({});
+    }
+    let hooks = config
+        .as_object_mut()
+        .ok_or_else(|| "invalid Antigravity hooks.json".to_string())?;
+    hooks.retain(|name, value| {
+        name != ANTIGRAVITY_HOOK_NAME && name != "thatisok" && !is_managed_hook_value(value)
+    });
+    hooks.insert(
+        ANTIGRAVITY_HOOK_NAME.to_string(),
+        json!({
+            "PreToolUse": [{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": build_tauri_hook_command(exe_path, bridge_path, "antigravity", "PreToolUse"),
+                    "timeout": 1800
+                }]
+            }],
+            "PostToolUse": [{
+                "matcher": "*",
+                "hooks": [{
+                    "type": "command",
+                    "command": build_tauri_hook_command(exe_path, bridge_path, "antigravity", "PostToolUse"),
+                    "timeout": 10
+                }]
+            }],
+            "Stop": [{
+                "type": "command",
+                "command": build_tauri_hook_command(exe_path, bridge_path, "antigravity", "Stop"),
+                "timeout": 10
+            }]
+        }),
+    );
+    if let Some(parent) = hooks_path.parent() {
+        fs::create_dir_all(parent).map_err(|err| err.to_string())?;
+    }
+    let content = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
+    fs::write(hooks_path, format!("{content}\n")).map_err(|err| err.to_string())
+}
+
 fn build_tauri_hook_command(
     exe_path: &Path,
     bridge_path: Option<&Path>,
@@ -535,10 +687,20 @@ fn is_managed_hook_value(value: &Value) -> bool {
     {
         return true;
     }
-    value
+    if value
         .get("hooks")
         .and_then(Value::as_array)
         .is_some_and(|hooks| hooks.iter().any(is_managed_hook_value))
+    {
+        return true;
+    }
+    if let Some(items) = value.as_array() {
+        return items.iter().any(is_managed_hook_value);
+    }
+    if let Some(items) = value.as_object() {
+        return items.values().any(is_managed_hook_value);
+    }
+    false
 }
 
 struct EventInfo {
@@ -747,7 +909,7 @@ async fn handle_hook_message(app: AppHandle, message: Value) -> Value {
         }),
     );
 
-    if event_lower != "permissionrequest" && event_lower != "permission_request" {
+    if !is_decision_event(source, event_name) {
         return json!({ "ok": true, "recorded": true });
     }
 
@@ -1041,6 +1203,7 @@ fn event_tool_name(payload: &Value) -> String {
         .get("tool_name")
         .or_else(|| payload.get("toolName"))
         .or_else(|| payload.get("tool"))
+        .or_else(|| nested_string(payload, &["toolCall", "name"]))
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string()
@@ -1054,6 +1217,9 @@ fn event_command(payload: &Value) -> String {
         .or_else(|| nested_string(payload, &["toolInput", "command"]))
         .or_else(|| nested_string(payload, &["input", "command"]))
         .or_else(|| nested_string(payload, &["parameters", "command"]))
+        .or_else(|| nested_string(payload, &["toolCall", "args", "command"]))
+        .or_else(|| nested_string(payload, &["toolCall", "args", "CommandLine"]))
+        .or_else(|| nested_string(payload, &["toolCall", "args", "commandLine"]))
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string()
@@ -1070,6 +1236,10 @@ fn event_file_path(payload: &Value) -> String {
         .or_else(|| nested_string(payload, &["toolInput", "path"]))
         .or_else(|| nested_string(payload, &["input", "path"]))
         .or_else(|| nested_string(payload, &["parameters", "path"]))
+        .or_else(|| nested_string(payload, &["toolCall", "args", "path"]))
+        .or_else(|| nested_string(payload, &["toolCall", "args", "Path"]))
+        .or_else(|| nested_string(payload, &["toolCall", "args", "FilePath"]))
+        .or_else(|| nested_string(payload, &["toolCall", "args", "DirectoryPath"]))
         .and_then(Value::as_str)
         .unwrap_or("")
         .to_string()
@@ -1112,7 +1282,7 @@ fn format_source_label(source: &str) -> &'static str {
     match source {
         "codex" => "Codex",
         "claude" => "Claude",
-        "gemini" => "Gemini",
+        "gemini" | "antigravity" => "Antigravity",
         "opencode" => "OpenCode",
         _ => "Agent",
     }

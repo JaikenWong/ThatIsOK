@@ -23,7 +23,7 @@ AgentIsOK is a **floating island** that lives on your desktop. It intercepts per
 - **Permission approval** — approve, create allow rules, answer ask prompts, or deny tool-use requests without tabbing back to terminal
 - **Home dashboard** — provider health, running agents, exact/estimated token usage, and today’s local activity in one view
 - **Usage tracking** — real-time progress bars for 5h / weekly / monthly quotas, credits, balances, and reset times
-- **Token accounting** — exact local token usage for Claude, Gemini, Codex, and OpenCode when their logs expose token data
+- **Token accounting** — exact local token usage for Claude, Codex, and OpenCode when their logs expose token data, plus Antigravity local activity
 - **Rules manager** — search, filter by agent source, remove rules with undo, and inspect long commands
 - **Always on top** — a transparent, draggable island that never gets buried under other windows
 
@@ -35,6 +35,7 @@ AgentIsOK is a **floating island** that lives on your desktop. It intercepts per
 |-------|--------|-------|
 | Claude Code | ✅ | Auto-injected on startup |
 | Codex | ✅ | Auto-injected on startup |
+| Antigravity | ✅ | Auto-injected into `~/.gemini/config/hooks.json` |
 | OpenCode | ✅ | Plugin install required ([see below](#opencode)) |
 
 ### Usage & balance
@@ -43,7 +44,7 @@ AgentIsOK is a **floating island** that lives on your desktop. It intercepts per
 |----------|--------|------------|--------|
 | Codex | 5h / 7d rate limits | Exact today tokens from session `token_count` events | Local auth + session files |
 | Claude Code | Today messages / sessions / tools | Exact today tokens from JSONL transcripts | Local Claude data |
-| Gemini | Daily requests / sessions | Exact today tokens from Gemini logs | Local Gemini data |
+| Antigravity | Local agent calls / sessions / selected model | Not exposed | Local Antigravity logs (`~/.gemini/antigravity*`) |
 | OpenCode Go | $12 / $30 / $60 limits | Exact today tokens from SQLite session/message records | Local SQLite (`opencode.db`) |
 | OpenCode Zen | Model availability | Not exposed | OpenCode API key |
 | Kiro | Credits | Not exposed | Local Kiro DB |
