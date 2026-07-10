@@ -1006,21 +1006,40 @@ body, html {
 .homeProvidersFooter {
     display: flex;
     flex-wrap: wrap;
-    gap: 3px;
-    padding-top: 4px;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 1px 0;
     border-top: 1px solid var(--b-subtle);
     flex-shrink: 0;
 }
 
 .homeProvidersFooter .healthItem {
     min-height: 0;
-    padding: 3px 6px;
-    gap: 4px;
+    padding: 2px 5px 2px 2px;
+    gap: 5px;
     flex: 0 0 auto;
+    border-radius: 9px;
+    background: transparent;
+    border-color: transparent;
 }
 
 .homeProvidersFooter .healthState {
-    font-size: 8px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    font-size: 0;
+    letter-spacing: 0;
+    background: currentColor;
+    box-shadow: 0 0 0 2px color-mix(in srgb, currentColor 16%, transparent);
+}
+
+.homeProvidersFooter .providerBadge {
+    width: 16px;
+    height: 16px;
+    flex-basis: 16px;
+    border-radius: 5px;
+    font-size: 9px;
+    opacity: 0.95;
 }
 
 .healthSummary {

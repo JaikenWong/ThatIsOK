@@ -1149,7 +1149,7 @@ function renderSetupHealth(data) {
         return `
             <div class="healthItem health-${tone}" title="${escapeHtml(label)}: ${text}">
                 ${renderProviderBadge(provider, label)}
-                <span class="healthState">${text}</span>
+                <span class="healthState" aria-hidden="true"></span>
             </div>
         `;
     }).join('');
@@ -1157,7 +1157,7 @@ function renderSetupHealth(data) {
     setupHealth.innerHTML = `
         ${agentSection}
         ${tokenSection}
-        <div class="healthGrid">${providerItems || '<div class="emptyState">No visible providers</div>'}</div>
+        <div class="homeProvidersFooter">${providerItems || '<div class="emptyState">No visible providers</div>'}</div>
     `;
 
     // Wire up agent click → re-render with selected agent detail
