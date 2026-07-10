@@ -1,21 +1,21 @@
-# ThatIsOK
+# AgentIsOK
 
 > Desktop approval & usage cockpit for AI coding agents — floating, local, no telemetry.
 
-ThatIsOK is a **floating island** that lives on your desktop. The in-app UI is branded as **Agent Gate**: it intercepts permission requests from coding agents, tracks quotas and balances, and shows today’s local token usage in one compact panel.
+AgentIsOK is a **floating island** that lives on your desktop. It intercepts permission requests from coding agents, tracks quotas and balances, and shows today’s local token usage in one compact panel.
 
 <p align="center">
-  <img src="assets/images/small.png" alt="Agent Gate collapsed island" width="360" />
+  <img src="assets/images/small.png" alt="AgentIsOK collapsed island" width="360" />
 </p>
 
 <p align="center">
-  <img src="assets/images/home.png" alt="Agent Gate Home dashboard with provider status and token usage" width="270" />
-  <img src="assets/images/Usage.png" alt="Agent Gate Usage view with provider toggles and quota cards" width="270" />
+  <img src="assets/images/home.png" alt="AgentIsOK Home dashboard with provider status and token usage" width="270" />
+  <img src="assets/images/Usage.png" alt="AgentIsOK Usage view with provider toggles and quota cards" width="270" />
 </p>
 
 <p align="center">
-  <img src="assets/images/Agents.png" alt="Agent Gate Agents view with live session detail" width="270" />
-  <img src="assets/images/rules.png" alt="Agent Gate Rules view with filters and delete controls" width="270" />
+  <img src="assets/images/Agents.png" alt="AgentIsOK Agents view with live session detail" width="270" />
+  <img src="assets/images/rules.png" alt="AgentIsOK Rules view with filters and delete controls" width="270" />
 </p>
 
 ## What it does
@@ -54,12 +54,12 @@ ThatIsOK is a **floating island** that lives on your desktop. The in-app UI is b
 
 ### From release (recommended)
 
-Download the latest `.dmg` (macOS) or `.exe` (Windows) from [Releases](https://github.com/JaikenWong/ThatIsOK/releases).
+Download the latest `.dmg` (macOS) or `.exe` (Windows) from [Releases](https://github.com/JaikenWong/AgentIsOK/releases).
 
 **macOS users:** the app is not Apple-notarized. After installing, run this once to bypass Gatekeeper:
 
 ```bash
-xattr -cr /Applications/Agent\ Gate.app
+xattr -cr /Applications/AgentIsOK.app
 ```
 
 Alternatively, right-click the app in Finder → **Open**.
@@ -67,8 +67,8 @@ Alternatively, right-click the app in Finder → **Open**.
 ### From source
 
 ```bash
-git clone https://github.com/JaikenWong/ThatIsOK.git
-cd ThatIsOK
+git clone https://github.com/JaikenWong/AgentIsOK.git
+cd AgentIsOK
 npm install
 npm run tauri:dev     # dev
 npm run tauri:build   # release build → src-tauri/target/release/bundle/
@@ -103,26 +103,26 @@ Right-click the tray icon (macOS menu bar / Windows system tray) for **Open**, *
 
 ## How hooks work
 
-On startup, ThatIsOK writes managed entries into:
+On startup, AgentIsOK writes managed entries into:
 
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
 
-When a tool-use permission is requested, the agent invokes the ThatIsOK binary with `--hook-source` and `--hook-event`. A TCP server on `127.0.0.1:45873` receives the event, displays the approval panel, and returns the decision.
+When a tool-use permission is requested, the agent invokes the AgentIsOK binary with `--hook-source` and `--hook-event`. A TCP server on `127.0.0.1:45873` receives the event, displays the approval panel, and returns the decision.
 
 ### OpenCode plugin
 
-Copy `src-tauri/plugins/thatisok-opencode.js` to `~/.config/opencode/plugins/`, then add to `~/.config/opencode/config.json`:
+Copy `src-tauri/plugins/agentisok-opencode.js` to `~/.config/opencode/plugins/`, then add to `~/.config/opencode/config.json`:
 
 ```json
-{ "plugin": ["file:///Users/YOU/.config/opencode/plugins/thatisok-opencode.js"] }
+{ "plugin": ["file:///Users/YOU/.config/opencode/plugins/agentisok-opencode.js"] }
 ```
 
 ## Configuration
 
 - **Sync interval** — expand the island, use `+/-` buttons in the settings row (5 / 10 / 15 / 30 / 60 minutes)
 - **Provider visibility** — toggle switches in the Usage tab; hidden providers are excluded from Home and collapsed meters
-- **Approval rules** — "Allow Rule" creates persistent rules stored in `~/.config/ThatIsOk/approval-rules.json`
+- **Approval rules** — "Allow Rule" creates persistent rules stored in `~/.config/AgentIsOK/approval-rules.json`
 - **Hooks** — install/remove managed hooks from the tray menu when you want to temporarily disable agent interception
 - **Hide from Dock** — macOS: app runs as accessory, tray-icon only. Windows: `skipTaskbar` by default.
 
@@ -139,7 +139,7 @@ Copy `src-tauri/plugins/thatisok-opencode.js` to `~/.config/opencode/plugins/`, 
 | Provider shows "Stale" | Re-login to the provider, then click **Sync** |
 | No usage bars appear | Provider may need a local login before data is available — hover the `?` badge for setup instructions |
 | Token count shows `--` | That provider does not expose local token records, or it has not synced today |
-| Hooks not working | Restart the coding agent after ThatIsOK has started |
+| Hooks not working | Restart the coding agent after AgentIsOK has started |
 | Island not showing | `Ctrl/Cmd+Shift+Space` toggles visibility; check tray icon |
 
 ## Tech stack

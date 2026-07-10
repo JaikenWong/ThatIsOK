@@ -53,7 +53,7 @@ const PROVIDER_SETUP_TIPS = {
     minimax: 'Requires MINIMAX_API_KEY or MINIMAX_CN_API_KEY in environment, then Sync.',
     gemini: 'Requires Gemini local login before usage can be synced.',
     deepseek: 'Requires DEEPSEEK_API_KEY in project .env or environment, then restart.',
-    opencode: 'Install Agent Gate plugin: copy thatisok-opencode.js to ~/.config/opencode/plugins/, update config.json.',
+    opencode: 'Install AgentIsOK plugin: copy agentisok-opencode.js to ~/.config/opencode/plugins/, update config.json.',
     kiro: 'Requires Kiro (Amazon Q) installed and signed in. Open Kiro dashboard once to populate usage data.'
 };
 
@@ -93,6 +93,11 @@ function expandIsland() {
     ipcRenderer.send('island:set-mode', 'expanded');
     scheduleExpandedHeightSync();
     setTimeout(scheduleExpandedHeightSync, 80);
+
+    const agentStatusIcons = document.getElementById('agentStatusIcons');
+    if (agentStatusIcons) {
+        agentStatusIcons.remove();
+    }
 }
 
 function collapseIsland() {
@@ -130,11 +135,12 @@ function refreshPillContent(data) {
         primaryValue.innerText = renderAccountHeadline(primaryAccount);
         hidePillProgress();
     } else {
-        primaryLabelText.innerText = 'Agent Gate';
+        primaryLabelText.innerText = 'AgentIsOK';
         primaryValue.innerText = 'Live';
         hidePillProgress();
     }
 
+    renderAgentStatusIcons(data.sessions || []);
     island.classList.remove('tone-neutral', 'tone-good', 'tone-warn', 'tone-danger');
     island.classList.add(getTone(data));
 }
@@ -439,11 +445,11 @@ function renderSummary(data) {
         primaryValue.innerText = renderAccountHeadline(primaryAccount);
         hidePillProgress();
     } else {
-        primaryLabelText.innerText = 'Agent Gate';
+        primaryLabelText.innerText = 'AgentIsOK';
         primaryValue.innerText = 'Live';
         hidePillProgress();
     }
-    renderSessions(data.sessions || []);
+    renderAgentStatusIcons(data.sessions || []);
     renderAccounts(data.accounts || [], false);
     renderSetupHealth(data);
     renderActiveView();
@@ -826,6 +832,78 @@ function renderProgressLine(line) {
     `;
 }
 
+function renderAgentStatusIcons(sessions) {
+    const meaningful = sessions
+        .filter(s => s && s.source)
+        .filter(s => String(s.status || '').toLowerCase() !== 'done')
+        .slice(0, 5);
+
+    const existing = document.getElementById('agentStatusIcons');
+    if (existing) {
+        existing.remove();
+    }
+
+    // Add/remove indicator dot on logo instead of separate icons
+    const logoRingDot = primaryLabel.querySelector('.logoRingDot');
+    if (logoRingDot) {
+        if (meaningful.length > 0) {
+            logoRingDot.style.fill = 'var(--c-ok)';
+            logoRingDot.style.filter = 'drop-shadow(0 0 3px var(--c-ok))';
+        } else {
+            logoRingDot.style.fill = '';
+            logoRingDot.style.filter = '';
+        }
+    }
+
+    if (!meaningful.length) {
+        return;
+    }
+
+    const container = document.createElement('div');
+    container.id = 'agentStatusIcons';
+    container.className = 'agentStatusIcons';
+
+    meaningful.forEach(session => {
+        const status = getAgentStatus(session);
+        const chip = document.createElement('div');
+        chip.className = `agentStatusChip ${status} source-${session.source || 'agent'}`;
+        chip.title = `${formatSource(session.source)}: ${status}`;
+        chip.innerHTML = '<span class="agentBar"></span><span class="agentBar"></span><span class="agentBar"></span>';
+        container.appendChild(chip);
+    });
+
+    primaryLabel.appendChild(container);
+
+    // Re-sync pill width to account for icons
+    syncPillWidth();
+}
+
+function getAgentStatus(session) {
+    const status = String(session.status || '').toLowerCase();
+    const lastEvent = String(session.lastEvent || '').toLowerCase();
+
+    if (status === 'waiting' || lastEvent.includes('permission') || lastEvent.includes('ask')) {
+        return 'waiting';
+    }
+    if (status === 'active' || status === 'running' || status === 'working') {
+        return 'running';
+    }
+    return 'idle';
+}
+
+function getAgentStatusIcon(status) {
+    switch (status) {
+        case 'running':
+            return '▶';
+        case 'waiting':
+            return '⏸';
+        case 'idle':
+            return '○';
+        default:
+            return '○';
+    }
+}
+
 function renderSessions(sessions) {
     const meaningful = sessions
         .filter(s => s && s.source)
@@ -851,7 +929,7 @@ function renderSessions(sessions) {
             <div class="agentList">
                 <div class="sessionsLabel">Running Agents</div>
                 ${meaningful.map((session) => `
-                <button class="agentListItem${session.id === selectedAgentId ? ' active' : ''}" data-agent-id="${escapeHtml(session.id)}" type="button">
+                <button class="agentListItem source-${session.source || 'agent'}${session.id === selectedAgentId ? ' active' : ''}" data-agent-id="${escapeHtml(session.id)}" type="button">
                     <span class="agentDot"></span>
                     <span class="agentListMain">
                         <span class="sessionName">${formatSource(session.source)}</span>
@@ -860,7 +938,7 @@ function renderSessions(sessions) {
                 </button>
                 `).join('')}
             </div>
-            <div class="agentDetail">
+            <div class="agentDetail source-${selected.source || 'agent'}">
                 <div class="agentDetailTop">
                     <div>
                         <div class="agentTitle">${formatSource(selected.source)}</div>
@@ -964,49 +1042,200 @@ function formatSessionMeta(session) {
     return parts.join(' · ');
 }
 
+function renderHomeAgentSection(sessions) {
+    const selected = sessions.find(s => s.id === selectedAgentId) || sessions[0];
+    return `
+        <div class="homeAgentsSection">
+            <div class="homeSectionLabel">Active Agents</div>
+            <div class="homeAgentList">
+                ${sessions.map(session => {
+                    const status = getAgentStatus(session);
+                    return `
+                        <button class="homeAgentRow source-${session.source || 'agent'}${session.id === selectedAgentId ? ' active' : ''}" data-agent-id="${escapeHtml(session.id)}" data-jump-target='${session.jumpTarget ? escapeHtml(JSON.stringify(session.jumpTarget)) : ''}' type="button">
+                            <span class="agentDot agentDot-${status}"></span>
+                            <span class="homeAgentInfo">
+                                <span class="homeAgentName">${formatSource(session.source)}</span>
+                                <span class="homeAgentActivity">${escapeHtml(session.activity || session.summary || session.status || 'Working')}</span>
+                            </span>
+                            <span class="homeAgentTime">${escapeHtml(formatTimelineTime(session.updatedAt))}</span>
+                        </button>
+                    `;
+                }).join('')}
+            </div>
+            ${selected ? renderHomeAgentDetail(selected) : ''}
+        </div>
+    `;
+}
+
+function renderHomeAgentDetail(session) {
+    if (!session) return '';
+    const jumpInfo = session.jumpTarget || {};
+    const hasFile = session.filePath && session.filePath !== '--';
+    const hasCommand = session.command && session.command !== '--';
+    const hasTool = session.toolName && session.toolName !== '--';
+    const hasEvent = session.lastEvent;
+    const hasActivityDetail = session.activityDetail && session.activityDetail !== session.activity;
+    const events = session.events || [];
+
+    const fields = [];
+    if (hasTool) fields.push(renderAgentField('Tool', session.toolName));
+    if (hasEvent) fields.push(renderAgentField('Event', session.lastEvent));
+    fields.push(renderAgentField('Session', compactText(session.id || '--', 34)));
+    if (hasFile) fields.push(renderAgentField('File', session.filePath, true));
+    if (hasCommand) fields.push(renderAgentField('Command', session.command, true));
+    if (jumpInfo.terminalApp) fields.push(renderAgentField('Terminal', jumpInfo.terminalApp));
+    if (jumpInfo.terminalTTY) fields.push(renderAgentField('TTY', jumpInfo.terminalTTY));
+    if (jumpInfo.workingDirectory) fields.push(renderAgentField('Working dir', jumpInfo.workingDirectory, true));
+
+    const gridHtml = fields.length
+        ? `<div class="agentDetailGrid">${fields.join('')}</div>`
+        : '';
+
+    const detailHtml = hasActivityDetail
+        ? `<pre class="agentActivityFull">${escapeHtml(session.activityDetail)}</pre>`
+        : '';
+
+    const timelineHtml = events.length ? renderAgentTimeline(events) : '';
+
+    return `
+        <div class="homeAgentDetail">
+            <div class="homeAgentDetailTop">
+                <div>
+                    <div class="homeAgentDetailTitle">${formatSource(session.source)}</div>
+                    <div class="homeAgentDetailMeta">${escapeHtml(formatSessionMeta(session))}</div>
+                </div>
+                <span class="homeAgentDetailStatus">${escapeHtml(session.status || 'Active')}</span>
+            </div>
+            <div class="homeAgentDetailSummary">${escapeHtml(session.activity || session.summary || 'Working')}</div>
+            ${detailHtml}
+            ${gridHtml}
+            ${timelineHtml}
+            ${session.jumpTarget ? `<button class="sessionJump agentJump" data-target='${escapeHtml(JSON.stringify(session.jumpTarget))}' type="button">Jump to Terminal</button>` : ''}
+        </div>
+    `;
+}
+
 function renderSetupHealth(data) {
     const accounts = data.accounts || [];
+    const sessions = data.sessions || [];
     const visibleAccounts = getPrioritizedVisibleAccounts(accounts);
     const activeProviders = Object.entries(providerVisibility)
         .filter(([, info]) => info.visible)
         .map(([provider]) => provider);
-    const connected = visibleAccounts.filter(a => !['setup', 'error', 'stale'].includes(a.status)).length;
-    const needsSetup = visibleAccounts.filter(a => ['setup', 'error', 'stale'].includes(a.status)).length;
-    const running = (data.sessions || [])
+
+    // Active agents with detail — merged from old Agents tab
+    const activeSessions = sessions
         .filter(s => s && s.source)
         .filter(s => String(s.status || '').toLowerCase() !== 'done')
-        .length;
+        .slice(0, 5);
 
-    const items = activeProviders.slice(0, 6).map(provider => {
+    const agentSection = activeSessions.length
+        ? renderHomeAgentSection(activeSessions)
+        : `<div class="homeAgentsSection">
+            <div class="homeSectionLabel">Active Agents</div>
+            <div class="emptyState">No agents running</div>
+        </div>`;
+
+    // Token stats — compact, only if data exists
+    const tokenSection = renderTodayTokenStatsCompact(visibleAccounts);
+
+    // Provider health — collapsed to bottom, minimal
+    const providerItems = activeProviders.slice(0, 8).map(provider => {
         const account = visibleAccounts.find(a => a.provider === provider);
         const label = providerVisibility[provider]?.label || account?.label || provider;
         const status = account?.status || 'setup';
         const tone = status === 'error' || status === 'stale' ? 'bad' : status === 'setup' ? 'setup' : 'ok';
-        const text = tone === 'ok' ? 'Live' : status === 'stale' ? 'Stale' : status === 'error' ? 'Fix' : 'Setup';
+        const text = tone === 'ok' ? 'OK' : status === 'stale' ? 'Stale' : status === 'error' ? 'Err' : '—';
         return `
-            <div class="healthItem health-${tone}">
-                <div class="healthLeft">
-                    ${renderProviderBadge(provider, label)}
-                    <span class="healthName">${escapeHtml(label)}</span>
-                    <span class="healthState">${text}</span>
-                </div>
-                ${renderHealthUsageInline(account)}
+            <div class="healthItem health-${tone}" title="${escapeHtml(label)}: ${text}">
+                ${renderProviderBadge(provider, label)}
+                <span class="healthState">${text}</span>
             </div>
         `;
     }).join('');
 
     setupHealth.innerHTML = `
-        <div class="healthSummary">
-            <div><strong>${connected}</strong><span>connected</span></div>
-            <div><strong>${needsSetup}</strong><span>needs setup</span></div>
-            <div><strong>${running}</strong><span>active</span></div>
+        ${agentSection}
+        ${tokenSection}
+        <div class="healthGrid">${providerItems || '<div class="emptyState">No visible providers</div>'}</div>
+    `;
+
+    // Wire up agent click → re-render with selected agent detail
+    setupHealth.querySelectorAll('.homeAgentRow').forEach(btn => {
+        let clickTimer = null;
+        let clickCount = 0;
+
+        btn.addEventListener('click', (e) => {
+            e.stopPropagation();
+            clickCount++;
+
+            if (clickCount === 1) {
+                clickTimer = setTimeout(() => {
+                    if (clickCount === 1) {
+                        // Single click: select agent
+                        selectedAgentId = btn.dataset.agentId;
+                        renderSetupHealth(currentData);
+                        scheduleExpandedHeightSync();
+                    }
+                    clickCount = 0;
+                }, 250);
+            } else if (clickCount === 2) {
+                // Double click: jump to terminal
+                clearTimeout(clickTimer);
+                clickCount = 0;
+                const jumpTarget = btn.dataset.jumpTarget;
+                if (!jumpTarget) return;
+                try {
+                    const target = JSON.parse(jumpTarget);
+                    ipcRenderer.invoke('island:jump-to-terminal', { target }).catch(err => {
+                        console.error('Session jump failed', err);
+                    });
+                } catch (err) {
+                    console.error('Invalid jump target', err);
+                }
+            }
+        });
+    });
+
+    // Wire up jump button
+    setupHealth.querySelectorAll('.sessionJump').forEach(btn => {
+        btn.addEventListener('click', async (e) => {
+            e.stopPropagation();
+            try {
+                const target = JSON.parse(btn.dataset.target);
+                await ipcRenderer.invoke('island:jump-to-terminal', { target });
+            } catch (err) {
+                console.error('Session jump failed', err);
+            }
+        });
+    });
+}
+
+function renderTodayTokenStatsCompact(accounts) {
+    const stats = accounts
+        .map(readAccountTokenStats)
+        .filter(item => item.total > 0);
+    const total = stats.reduce((sum, item) => sum + item.total, 0);
+
+    if (!stats.length) {
+        return '';
+    }
+
+    const topProviders = stats.slice(0, 3).map(item => `
+        <div class="homeTokenChip">
+            <span class="homeTokenChipLabel">${escapeHtml(item.label)}</span>
+            <strong class="homeTokenChipValue">${escapeHtml(formatCompactNumber(item.total))}</strong>
         </div>
-        <div class="homeDashboard">
-            <div class="healthGrid">${items || '<div class="emptyState">No visible providers</div>'}</div>
-            <div class="homeMetrics">
-                ${renderTodayTokenStats(visibleAccounts)}
-                ${renderHomeUsageFloor(visibleAccounts)}
+    `).join('');
+
+    return `
+        <div class="homeTokensCompact">
+            <div class="homeTokensTotal">
+                <span>Today</span>
+                <strong>${escapeHtml(formatCompactNumber(total))}</strong>
+                <span class="homeTokensUnit">tokens</span>
             </div>
+            <div class="homeTokensChips">${topProviders}</div>
         </div>
     `;
 }
@@ -1166,12 +1395,11 @@ function renderHomeUsageFloor(accounts) {
 function renderActiveView() {
     const compact = Boolean(pendingIntervention);
     island.classList.toggle('approvalView', compact);
-    island.classList.toggle('agentsView', !compact && activeView === 'agents');
     island.classList.toggle('usageView', !compact && activeView === 'usage');
-    island.classList.toggle('panelView', !compact && ['home', 'agents', 'usage', 'rules'].includes(activeView));
+    island.classList.toggle('panelView', !compact && ['home', 'usage', 'rules'].includes(activeView));
     viewTabs.classList.toggle('hidden', compact);
     setupHealth.classList.toggle('hidden', compact || activeView !== 'home');
-    sessionsList.classList.toggle('viewHidden', compact || activeView !== 'agents');
+    sessionsList.classList.toggle('viewHidden', compact || activeView !== 'home');
     document.querySelector('.topStack')?.classList.toggle('hidden', compact || activeView !== 'usage');
     accountsList.classList.toggle('hidden', compact || activeView !== 'usage');
     rulesPanel.classList.toggle('hidden', compact || activeView !== 'rules');
@@ -1181,7 +1409,7 @@ function renderActiveView() {
 }
 
 function setActiveView(view) {
-    if (view === 'activity') {
+    if (view === 'activity' || view === 'agents') {
         view = 'home';
     }
     activeView = view;
@@ -1685,15 +1913,24 @@ function syncPillWidth() {
         return;
     }
 
-    const logoWidth = primaryLabel.offsetWidth || 0;
+    // Dynamically adjust padding-left in rings mode to fit logo + agent icons
+    if (pillContent.classList.contains('pillContent-rings')) {
+        const labelW = primaryLabel.scrollWidth || primaryLabel.offsetWidth || 0;
+        const dynamicPad = Math.max(41, labelW + 8);
+        pillContent.style.paddingLeft = dynamicPad + 'px';
+    } else {
+        pillContent.style.paddingLeft = '';
+    }
+
+    const logoWidth = primaryLabel.scrollWidth || primaryLabel.offsetWidth || 0;
     const ringsWidth = pillProgress.offsetWidth || 0;
     const gap = 14;
     const islandStyle = window.getComputedStyle(island);
     const padLeft = Number.parseFloat(islandStyle.paddingLeft) || 0;
     const padRight = Number.parseFloat(islandStyle.paddingRight) || 0;
     const needed = Math.ceil(logoWidth + gap + ringsWidth + padLeft + padRight + 4);
-    const minW = 140;
-    const clamped = Math.max(minW, needed);
+    const baseW = 200;
+    const clamped = Math.max(baseW, needed);
 
     if (Math.abs(clamped - lastPillWidth) < 6) {
         return;
@@ -1772,7 +2009,7 @@ ipcRenderer.on('hook-event', (_event, payload) => {
             sessions.unshift(nextSession);
         }
         currentData.sessions = sessions.slice(0, 5);
-        renderSessions(currentData.sessions || []);
+        renderAgentStatusIcons(currentData.sessions || []);
         renderSetupHealth(currentData);
     }
 });
@@ -1805,8 +2042,9 @@ checkUpdateButton.addEventListener('click', async () => {
 syncButton.addEventListener('click', async () => {
     syncButton.disabled = true;
     syncButton.classList.add('loading');
-    const originalText = syncButton.innerText;
-    syncButton.innerText = 'Syncing...';
+    const originalLabel = syncButton.getAttribute('aria-label') || 'Sync now';
+    syncButton.setAttribute('aria-label', 'Syncing');
+    syncButton.title = 'Syncing';
     try {
         const data = await ipcRenderer.invoke('island:sync-now');
         renderSummary(data);
@@ -1816,7 +2054,8 @@ syncButton.addEventListener('click', async () => {
     } finally {
         syncButton.disabled = false;
         syncButton.classList.remove('loading');
-        syncButton.innerText = originalText;
+        syncButton.setAttribute('aria-label', originalLabel);
+        syncButton.title = 'Sync';
     }
 });
 
@@ -2189,7 +2428,7 @@ function showUpdateBanner(status, message) {
             });
             break;
         case 'up-to-date':
-            el.textContent = 'Agent Gate is up to date.';
+            el.textContent = 'AgentIsOK is up to date.';
             setTimeout(() => { el.textContent = ''; el.classList.add('hidden'); }, 4000);
             break;
         case 'error':

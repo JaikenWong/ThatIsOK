@@ -1,12 +1,12 @@
 [package]
-name = "thatisok"
+name = "agentisok"
 version = "1.0.8"
 description = "AI agent cost and approval cockpit"
-authors = ["ThatIsOK"]
+authors = ["AgentIsOK"]
 edition = "2021"
 
 [lib]
-name = "thatisok_lib"
+name = "agentisok_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

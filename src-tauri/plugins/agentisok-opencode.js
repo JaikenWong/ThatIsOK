@@ -1,18 +1,18 @@
-// ThatIsOK hook plugin for OpenCode
-// Bridges OpenCode events to ThatIsOK desktop app via TCP.
+// AgentIsOK hook plugin for OpenCode
+// Bridges OpenCode events to AgentIsOK desktop app via TCP.
 //
 // Install:
-//   1. Copy this file to ~/.config/opencode/plugins/thatisok.js
+//   1. Copy this file to ~/.config/opencode/plugins/agentisok.js
 //   2. Add to ~/.config/opencode/config.json:
-//      { "plugin": ["file:///Users/YOU/.config/opencode/plugins/thatisok.js"] }
+//      { "plugin": ["file:///Users/YOU/.config/opencode/plugins/agentisok.js"] }
 //
-// ThatIsOK must be running (the Tauri app) for permission requests to work.
+// AgentIsOK must be running (the Tauri app) for permission requests to work.
 // Non-permission events are fire-and-forget — OpenCode keeps working even if
-// ThatIsOK is not running.
+// AgentIsOK is not running.
 import { connect } from "net";
 import { appendFileSync } from "fs";
 
-const DEBUG_LOG = "/tmp/thatisok-opencode.log";
+const DEBUG_LOG = "/tmp/agentisok-opencode.log";
 function debug(msg) {
   try { appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] ${msg}\n`); } catch {}
 }
@@ -32,7 +32,7 @@ const HOOK_EVENTS = {
 };
 
 /**
- * Connect to ThatIsOK TCP server, send a JSON line, read one response line.
+ * Connect to AgentIsOK TCP server, send a JSON line, read one response line.
  */
 function sendAndWait(payload, timeoutMs = PERMISSION_TIMEOUT_MS) {
   return new Promise((resolve) => {
@@ -215,7 +215,7 @@ export default async ({ client, serverUrl }) => {
         if (!payload) return;
         debug(`MAPPED ${payload.data.event} source=${payload.data.source}`);
 
-        // PermissionRequest — block and wait for ThatIsOK decision
+        // PermissionRequest — block and wait for AgentIsOK decision
         if (payload.data.event === "PermissionRequest" && internalFetch) {
           const requestId = payload.data.payload?.permission_id;
           if (!requestId) return;
@@ -240,7 +240,7 @@ export default async ({ client, serverUrl }) => {
         // Regular events — fire and forget
         sendFireAndForget(payload);
       } catch {
-        // Never block OpenCode if ThatIsOK is down
+        // Never block OpenCode if AgentIsOK is down
       }
     },
   };

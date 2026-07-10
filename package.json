@@ -1,5 +1,5 @@
 {
-  "name": "thatisok",
+  "name": "agentisok",
   "version": "1.0.8",
   "description": "Local approval and usage cockpit for Claude Code, Codex, Gemini, Cursor, MiniMax, and DeepSeek",
   "scripts": {

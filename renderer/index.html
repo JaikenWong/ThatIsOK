@@ -18,14 +18,14 @@
                         <rect class="logoEye leftEye" x="8" y="11" width="4" height="10" rx="2" />
                         <rect class="logoEye rightEye" x="20" y="11" width="4" height="10" rx="2" />
                     </svg>
-                    <span id="primaryLabelText">Agent Gate</span>
+                    <span id="primaryLabelText">AgentIsOK</span>
                 </span>
                 <span id="primaryValue">Live</span>
                 <div id="pillProgress" class="pillProgressGroup hidden"></div>
             </div>
             <div id="expandedContent" class="hidden">
                 <div id="welcomeGuide" class="welcomeGuide hidden">
-                    <div class="welcomeHeader">Welcome to Agent Gate</div>
+                    <div class="welcomeHeader">Welcome to AgentIsOK</div>
                     <div class="welcomeText">Monitor your AI usage and approve tool calls from one place.</div>
                     <div class="guideSteps">
                         <div class="guideStep">
@@ -72,7 +72,6 @@
                 </div>
                 <div id="viewTabs" class="viewTabs">
                     <button class="viewTab active" data-view="home" type="button">Home</button>
-                    <button class="viewTab" data-view="agents" type="button">Agents</button>
                     <button class="viewTab" data-view="usage" type="button">Usage</button>
                     <button class="viewTab" data-view="rules" type="button">Rules</button>
                 </div>
@@ -92,7 +91,7 @@
                     </div>
                     <div class="settingsRow">
                         <span class="settingsLabel">Version <span id="appVersion">--</span></span>
-                        <button id="checkUpdateButton" class="btn sync" style="padding: 2px 8px; font-size: 9px; flex: 0 0 auto;">Check Updates</button>
+                        <button id="checkUpdateButton" class="btn sync">Check Updates</button>
                     </div>
                 </div>
                 <div id="settingsMeta" class="runtimeWarning hidden"></div>
@@ -109,7 +108,7 @@
                 </div>
             </div>
             <div class="actions">
-                <button id="syncButton" class="btn sync">Sync</button>
+                <button id="syncButton" class="btn sync" type="button" aria-label="Sync now" title="Sync"></button>
                 <span id="syncedAt" class="syncedAt"></span>
             </div>
         </div>

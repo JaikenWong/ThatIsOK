@@ -1168,10 +1168,13 @@ fn collect_chromium_cookie_db_paths(root: &Path, out: &mut Vec<PathBuf>) {
 }
 
 fn read_chromium_opencodego_cookie_from_db(db_path: &Path) -> Option<String> {
+    use std::sync::atomic::{AtomicU64, Ordering};
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     let temp_path = std::env::temp_dir().join(format!(
-        "thatisok-opencode-cookies-{}-{}.sqlite",
+        "agentisok-opencode-cookies-{}-{}-{}.sqlite",
         std::process::id(),
         now_millis(),
+        COUNTER.fetch_add(1, Ordering::SeqCst),
     ));
     // Remove stale temp file from previous sync
     let _ = fs::remove_file(&temp_path);

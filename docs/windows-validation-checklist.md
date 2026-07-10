@@ -10,7 +10,7 @@ This checklist proves:
 - floating island works
 - tray works
 - shortcuts work
-- hook injection points at packaged `ThatIsOk.exe`
+- hook injection points at packaged `AgentIsOK.exe`
 - hook runtime returns decisions correctly
 - sync works or fails softly
 - no stale Electron or `node` dependency remains
@@ -48,7 +48,7 @@ Fail release if:
 ## Install
 
 1. Run NSIS installer with default per-user flow.
-2. Confirm Start Menu entry exists: `ThatIsOk`.
+2. Confirm Start Menu entry exists: `AgentIsOK`.
 3. Confirm uninstall entry exists in Windows Apps list.
 
 Expected evidence:
@@ -149,7 +149,7 @@ Launch packaged app once, then inspect:
 Expected evidence:
 
 - managed entries exist
-- commands point to packaged `ThatIsOk.exe`
+- commands point to packaged `AgentIsOK.exe`
 - commands contain:
   - `--hook-source`
   - `--hook-event`
@@ -160,8 +160,8 @@ Expected evidence:
 PowerShell checks:
 
 ```powershell
-Select-String -Path "$env:USERPROFILE\.codex\hooks.json" -Pattern "ThatIsOk.exe","--hook-source","--hook-event"
-Select-String -Path "$env:USERPROFILE\.claude\settings.json" -Pattern "ThatIsOk.exe","--hook-source","--hook-event"
+Select-String -Path "$env:USERPROFILE\.codex\hooks.json" -Pattern "AgentIsOK.exe","--hook-source","--hook-event"
+Select-String -Path "$env:USERPROFILE\.claude\settings.json" -Pattern "AgentIsOK.exe","--hook-source","--hook-event"
 Select-String -Path "$env:USERPROFILE\.codex\hooks.json" -Pattern "node|hook-bridge\.js"
 Select-String -Path "$env:USERPROFILE\.claude\settings.json" -Pattern "node|hook-bridge\.js"
 ```
@@ -187,7 +187,7 @@ Expected evidence:
 
 Persistent approval evidence:
 
-- `%APPDATA%\ThatIsOk\approval-rules.json` exists after approve-always
+- `%APPDATA%\AgentIsOK\approval-rules.json` exists after approve-always
 
 Fail release if:
 
@@ -255,7 +255,7 @@ Expected evidence:
 
 Config evidence:
 
-- `%APPDATA%\ThatIsOk\defaults.json` contains `syncIntervalMinutes`
+- `%APPDATA%\AgentIsOK\defaults.json` contains `syncIntervalMinutes`
 
 Fail release if:
 
@@ -291,7 +291,7 @@ Save these with release notes or QA ticket:
 - screenshot of pending approval
 - screenshot of warning strip
 - copy of `hooks.json` managed command
-- copy of `%APPDATA%\ThatIsOk\defaults.json`
+- copy of `%APPDATA%\AgentIsOK\defaults.json`
 - build date and git commit
 
 ## Release Gate

@@ -30,11 +30,11 @@ function releaseUrl(name) {
 }
 
 const platforms = {
-  "darwin-aarch64": `ThatIsOK_aarch64.app.tar.gz`,
-  "darwin-x86_64": `ThatIsOK_x64.app.tar.gz`,
-  "windows-x86_64": `ThatIsOK_${version}_x64-setup.exe`,
-  "windows-i686": `ThatIsOK_${version}_x86-setup.exe`,
-  "linux-x86_64": `ThatIsOK_${version}_amd64.AppImage.tar.gz`,
+  "darwin-aarch64": `AgentIsOK_aarch64.app.tar.gz`,
+  "darwin-x86_64": `AgentIsOK_x64.app.tar.gz`,
+  "windows-x86_64": `AgentIsOK_${version}_x64-setup.exe`,
+  "windows-i686": `AgentIsOK_${version}_x86-setup.exe`,
+  "linux-x86_64": `AgentIsOK_${version}_amd64.AppImage.tar.gz`,
 };
 
 const requiredPlatforms = new Set(["darwin-aarch64", "windows-x86_64"]);

@@ -31,12 +31,12 @@ macro_rules! debug_log {
     };
 }
 
-const PILL_WIDTH: u32 = 356;
+const PILL_WIDTH: u32 = 480;
 const PILL_HEIGHT: u32 = 50;
-const EXPANDED_WIDTH: u32 = 560;
+const EXPANDED_WIDTH: u32 = 480;
 const DEFAULT_EXPANDED_HEIGHT: u32 = 600;
 const WINDOW_MARGIN: i32 = 12;
-const MANAGED_KEY: &str = "ThatIsOk";
+const MANAGED_KEY: &str = "AgentIsOk";
 const DEFAULTS_JSON: &str = include_str!("../../config/defaults.json");
 const PROVIDERS_JSON: &str = include_str!("../../config/providers.json");
 const ALL_HOOK_EVENTS: &[&str] = &[
@@ -206,11 +206,11 @@ struct ProviderVisibility {
     label: String,
 }
 
-fn app_config_dir() -> PathBuf {
+pub(crate) fn app_config_dir() -> PathBuf {
     dirs::config_dir()
         .or_else(dirs::home_dir)
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("ThatIsOk")
+        .join("AgentIsOK")
 }
 
 fn read_json_file(name: &str) -> Value {
@@ -274,8 +274,8 @@ fn env_file_candidates() -> Vec<PathBuf> {
         paths.push(cwd.join(".env"));
     }
     if let Some(home) = dirs::home_dir() {
-        paths.push(home.join(".thatisok").join(".env"));
-        paths.push(home.join(".config").join("thatisok").join(".env"));
+        paths.push(home.join(".agentisok").join(".env"));
+        paths.push(home.join(".config").join("agentisok").join(".env"));
         for profile in [
             ".zshenv",
             ".zprofile",
@@ -312,7 +312,7 @@ fn parse_env_line(line: &str) -> Option<(String, String)> {
         if rest.starts_with(char::is_whitespace) {
             rest.trim_start()
         } else {
-            trimmed
+            return None;
         }
     } else {
         trimmed
@@ -376,7 +376,8 @@ fn write_approval_rules(rules: &[ApprovalRule]) -> Result<(), String> {
 
 fn is_managed_command(command: &str) -> bool {
     let command = command.to_ascii_lowercase();
-    command.contains("thatisok")
+    command.contains("agentisok")
+        || command.contains("thatisok")
         || command.contains("hook-bridge.js")
         || command.contains("--hook-source")
 }
@@ -1272,7 +1273,67 @@ async fn jump_to_terminal(target: Value) -> Result<bool, String> {
                 end tell",
                 tty
             ),
+            "ghostty" => {
+                let tty_match = if !tty.is_empty() {
+                    format!(
+                        "tell application \"Ghostty\"\n\
+                            activate\n\
+                            repeat with aWindow in windows\n\
+                                repeat with aTab in tabs of aWindow\n\
+                                    if name of aTab contains \"{}\" then\n\
+                                        set selected of aTab to true\n\
+                                        return true\n\
+                                    end if\n\
+                                end repeat\n\
+                            end repeat\n\
+                        end tell",
+                        tty
+                    )
+                } else if !cwd.is_empty() {
+                    format!(
+                        "tell application \"Ghostty\"\n\
+                            activate\n\
+                            repeat with aWindow in windows\n\
+                                repeat with aTab in tabs of aWindow\n\
+                                    if name of aTab contains \"{}\" then\n\
+                                        set selected of aTab to true\n\
+                                        return true\n\
+                                    end if\n\
+                                end repeat\n\
+                            end repeat\n\
+                        end tell",
+                        applescript_string(cwd)
+                    )
+                } else {
+                    "tell application \"Ghostty\" to activate".to_string()
+                };
+                tty_match
+            }
+            "cmux" => format!(
+                "tell application \"Ghostty\"\n\
+                    activate\n\
+                    repeat with aWindow in windows\n\
+                        repeat with aTab in tabs of aWindow\n\
+                            if name of aTab contains \"{}\" then\n\
+                                set selected of aTab to true\n\
+                                return true\n\
+                            end if\n\
+                        end repeat\n\
+                    end repeat\n\
+                end tell",
+                if !tty.is_empty() { tty.clone() } else { applescript_string(cwd) }
+            ),
             _ => {
+                let app_name = terminal_app;
+                let activate_script = format!(
+                    "tell application \"{}\" to activate",
+                    applescript_string(app_name)
+                );
+                let _ = std::process::Command::new("osascript")
+                    .arg("-e")
+                    .arg(&activate_script)
+                    .output();
+
                 if !cwd.is_empty() {
                     return std::process::Command::new("open")
                         .arg(cwd)
@@ -1280,7 +1341,7 @@ async fn jump_to_terminal(target: Value) -> Result<bool, String> {
                         .map(|status| status.success())
                         .map_err(|e| e.to_string());
                 } else {
-                    return Ok(false);
+                    return Ok(true);
                 }
             }
         };
@@ -1460,7 +1521,7 @@ fn uninstall_hooks(app: &AppHandle) -> Result<(), String> {
     hooks::remove_agent_hooks()?;
     emit_runtime_warning(
         app,
-        "Agent Gate hooks removed. Agent integrations are disabled until hooks are installed again.",
+        "AgentIsOK hooks removed. Agent integrations are disabled until hooks are installed again.",
     );
     Ok(())
 }
@@ -1618,7 +1679,7 @@ pub fn run() {
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let version = app.package_info().version.to_string();
                 let update_item =
-                    MenuItemBuilder::with_id("update", format!("Agent Gate v{version}"))
+                    MenuItemBuilder::with_id("update", format!("AgentIsOK v{version}"))
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
                 let sep_view = PredefinedMenuItem::separator(app)
@@ -1719,7 +1780,7 @@ pub fn run() {
                                         } else {
                                             emit_runtime_warning(
                                                 &app_handle_inner,
-                                                "Agent Gate hooks installed.",
+                                                "AgentIsOK hooks installed.",
                                             );
                                         }
                                     }

@@ -1,21 +1,21 @@
-# ThatIsOK
+# AgentIsOK
 
 > AI 编码工具桌面审批与用量驾驶舱 — 悬浮、本地、无追踪。
 
-ThatIsOK 是一个常驻桌面的**浮动小岛**。应用内显示为 **Agent Gate**：它能拦截编码 Agent 的权限请求，追踪额度、余额，并在 Home 中展示今日本地 token 用量。
+AgentIsOK 是一个常驻桌面的**浮动小岛**。它能拦截编码 Agent 的权限请求，追踪额度、余额，并在 Home 中展示今日本地 token 用量。
 
 <p align="center">
-  <img src="assets/images/small.png" alt="Agent Gate 收起状态" width="360" />
+  <img src="assets/images/small.png" alt="AgentIsOK 收起状态" width="360" />
 </p>
 
 <p align="center">
-  <img src="assets/images/home.png" alt="Agent Gate Home：Provider 状态和 token 用量" width="270" />
-  <img src="assets/images/Usage.png" alt="Agent Gate Usage：Provider 开关和额度卡片" width="270" />
+  <img src="assets/images/home.png" alt="AgentIsOK Home：Provider 状态和 token 用量" width="270" />
+  <img src="assets/images/Usage.png" alt="AgentIsOK Usage：Provider 开关和额度卡片" width="270" />
 </p>
 
 <p align="center">
-  <img src="assets/images/Agents.png" alt="Agent Gate Agents：实时会话详情" width="270" />
-  <img src="assets/images/rules.png" alt="Agent Gate Rules：规则筛选和删除" width="270" />
+  <img src="assets/images/Agents.png" alt="AgentIsOK Agents：实时会话详情" width="270" />
+  <img src="assets/images/rules.png" alt="AgentIsOK Rules：规则筛选和删除" width="270" />
 </p>
 
 ## 功能
@@ -54,12 +54,12 @@ ThatIsOK 是一个常驻桌面的**浮动小岛**。应用内显示为 **Agent G
 
 ### 发行版（推荐）
 
-从 [Releases](https://github.com/JaikenWong/ThatIsOK/releases) 下载最新 `.dmg`（macOS）或 `.exe`（Windows）。
+从 [Releases](https://github.com/JaikenWong/AgentIsOK/releases) 下载最新 `.dmg`（macOS）或 `.exe`（Windows）。
 
 **macOS 用户注意：** 应用未经过 Apple 公证，安装后需运行一次：
 
 ```bash
-xattr -cr /Applications/Agent\ Gate.app
+xattr -cr /Applications/AgentIsOK.app
 ```
 
 或在 Finder 中右键点击 app → **打开**。
@@ -67,8 +67,8 @@ xattr -cr /Applications/Agent\ Gate.app
 ### 从源码编译
 
 ```bash
-git clone https://github.com/JaikenWong/ThatIsOK.git
-cd ThatIsOK
+git clone https://github.com/JaikenWong/AgentIsOK.git
+cd AgentIsOK
 npm install
 npm run tauri:dev     # 开发
 npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
@@ -103,26 +103,26 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 
 ## Hook 工作原理
 
-启动时，ThatIsOK 会向以下文件写入受管 hook 条目：
+启动时，AgentIsOK 会向以下文件写入受管 hook 条目：
 
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
 
-当工具使用权限被请求时，agent 以 `--hook-source` 和 `--hook-event` 参数调用 ThatIsOK 可执行文件。本地 TCP 服务（`127.0.0.1:45873`）接收事件，显示审批面板，并返回决定。
+当工具使用权限被请求时，agent 以 `--hook-source` 和 `--hook-event` 参数调用 AgentIsOK 可执行文件。本地 TCP 服务（`127.0.0.1:45873`）接收事件，显示审批面板，并返回决定。
 
 ### OpenCode 插件
 
-将 `src-tauri/plugins/thatisok-opencode.js` 复制到 `~/.config/opencode/plugins/`，然后在 `~/.config/opencode/config.json` 中添加：
+将 `src-tauri/plugins/agentisok-opencode.js` 复制到 `~/.config/opencode/plugins/`，然后在 `~/.config/opencode/config.json` 中添加：
 
 ```json
-{ "plugin": ["file:///Users/你的用户名/.config/opencode/plugins/thatisok-opencode.js"] }
+{ "plugin": ["file:///Users/你的用户名/.config/opencode/plugins/agentisok-opencode.js"] }
 ```
 
 ## 配置
 
 - **同步间隔** — 展开悬浮岛，点击设置行的 `+/-`（5 / 10 / 15 / 30 / 60 分钟）
 - **Provider 显隐** — Usage 视图中的开关；关闭的 provider 不出现在 Home 和收起状态
-- **审批规则** — "Allow Rule / 允许规则" 会创建持久规则，保存在 `~/.config/ThatIsOk/approval-rules.json`
+- **审批规则** — "Allow Rule / 允许规则" 会创建持久规则，保存在 `~/.config/AgentIsOK/approval-rules.json`
 - **Hooks** — 可在托盘菜单安装/移除受管 hooks，用于临时关闭 Agent 拦截
 - **隐藏程序坞** — macOS：应用以辅助模式运行，仅显示托盘图标。Windows：默认不显示任务栏图标。
 
@@ -139,7 +139,7 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 | Provider 显示 "Stale" | 重新登录对应 provider，然后点 **Sync** |
 | 没有额度进度条 | Provider 可能需要本地登录才有数据 — 悬停 `?` 查看配置说明 |
 | Token 显示 `--` | 该 provider 没有暴露本地 token 记录，或今天还没同步到数据 |
-| Hook 不生效 | 先启动 ThatIsOK，再启动编码工具 |
+| Hook 不生效 | 先启动 AgentIsOK，再启动编码工具 |
 | 小岛不显示 | `Ctrl/Cmd+Shift+Space` 切换可见性；检查托盘图标 |
 
 ## 技术栈

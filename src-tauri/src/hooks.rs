@@ -10,7 +10,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::oneshot;
 
 use crate::{
-    build_intervention, is_managed_command, is_persistently_allowed, now_millis,
+    app_config_dir, build_intervention, is_managed_command, is_persistently_allowed, now_millis,
     pending_intervention_json, refresh_opencode_local_usage, AppState, PendingIntervention,
     SessionEvent, SessionInfo, ALL_HOOK_EVENTS, CLAUDE_HOOK_EVENTS, CODEX_HOOK_EVENTS, MANAGED_KEY,
 };
@@ -32,7 +32,7 @@ pub fn run_hook_bridge_from_args() -> bool {
             let _ = fs::OpenOptions::new()
                 .create(true)
                 .append(true)
-                .open(home.join(".thatisok-hook-debug.log"))
+                .open(home.join(".agentisok-hook-debug.log"))
                 .and_then(|mut f| write!(f, "[{}] {}\n", now_millis(), msg));
         }
     };
@@ -91,14 +91,25 @@ pub(crate) fn inject_agent_hooks(app: &AppHandle) {
             return;
         }
     };
-    if let Err(error) = inject_codex_hooks(&exe_path) {
+    let bridge_path = match ensure_bridge_script() {
+        Ok(path) => Some(path),
+        Err(error) => {
+            eprintln!("failed to install hook bridge script: {error}");
+            emit_runtime_warning(
+                app,
+                "Hook bridge script setup failed. On Windows hooks will fall back to spawning the app executable.",
+            );
+            None
+        }
+    };
+    if let Err(error) = inject_codex_hooks(&exe_path, bridge_path.as_deref()) {
         eprintln!("failed to install Codex hooks: {error}");
         emit_runtime_warning(
             app,
             "Codex hook setup failed. Check local permissions and Codex config files.",
         );
     }
-    if let Err(error) = inject_claude_hooks(&exe_path) {
+    if let Err(error) = inject_claude_hooks(&exe_path, bridge_path.as_deref()) {
         eprintln!("failed to install Claude hooks: {error}");
         emit_runtime_warning(
             app,
@@ -112,6 +123,18 @@ pub(crate) fn inject_agent_hooks(app: &AppHandle) {
             "OpenCode hook setup failed. Check local permissions and OpenCode config.",
         );
     }
+}
+
+/// Drop the JS hook-bridge script next to the app config so that on platforms
+/// where spawning the signed app exe on every hook event is undesirable (e.g.
+/// Windows whitelisting/EDR) we can instead invoke `node <bridge.js>`.
+fn ensure_bridge_script() -> Result<std::path::PathBuf, String> {
+    let dir = app_config_dir();
+    fs::create_dir_all(&dir).map_err(|err| err.to_string())?;
+    let bridge_path = dir.join("hook-bridge.js");
+    let content = include_str!("../plugins/hook-bridge.js");
+    fs::write(&bridge_path, content).map_err(|err| err.to_string())?;
+    Ok(bridge_path)
 }
 
 pub(crate) fn remove_agent_hooks() -> Result<(), String> {
@@ -129,6 +152,9 @@ pub(crate) fn remove_agent_hooks() -> Result<(), String> {
     }
     if let Err(error) = remove_opencode_plugin(&home) {
         errors.push(format!("OpenCode: {error}"));
+    }
+    if let Err(error) = remove_bridge_script() {
+        errors.push(format!("bridge: {error}"));
     }
 
     if errors.is_empty() {
@@ -195,13 +221,12 @@ fn remove_managed_hooks_from_file(path: &Path) -> Result<(), String> {
 }
 
 fn remove_opencode_plugin(home: &Path) -> Result<(), String> {
-    let plugin_path = home
-        .join(".config")
-        .join("opencode")
-        .join("plugins")
-        .join("thatisok.js");
-    if plugin_path.exists() {
-        fs::remove_file(&plugin_path).map_err(|err| err.to_string())?;
+    let plugins_dir = home.join(".config").join("opencode").join("plugins");
+    for plugin_name in ["agentisok.js", "thatisok.js"] {
+        let plugin_path = plugins_dir.join(plugin_name);
+        if plugin_path.exists() {
+            fs::remove_file(&plugin_path).map_err(|err| err.to_string())?;
+        }
     }
 
     let config_path = home.join(".config").join("opencode").join("config.json");
@@ -214,11 +239,24 @@ fn remove_opencode_plugin(home: &Path) -> Result<(), String> {
     };
     plugins.retain(|item| {
         item.as_str()
-            .map(|value| !value.contains("thatisok.js") && !value.contains("ThatIsOK"))
+            .map(|value| {
+                !value.contains("agentisok.js")
+                    && !value.contains("AgentIsOK")
+                    && !value.contains("thatisok.js")
+                    && !value.contains("ThatIsOK")
+            })
             .unwrap_or(true)
     });
     let content = serde_json::to_string_pretty(&config).map_err(|err| err.to_string())?;
     fs::write(config_path, format!("{content}\n")).map_err(|err| err.to_string())
+}
+
+fn remove_bridge_script() -> Result<(), String> {
+    let bridge_path = app_config_dir().join("hook-bridge.js");
+    if bridge_path.exists() {
+        fs::remove_file(&bridge_path).map_err(|err| err.to_string())?;
+    }
+    Ok(())
 }
 
 fn get_cli_arg(args: &[String], name: &str) -> Option<String> {
@@ -284,7 +322,7 @@ fn write_permission_output(source: &str, response: &Value) -> Result<(), String>
     if !approved {
         decision.insert(
             "message".to_string(),
-            Value::String("Denied from ThatIsOK".to_string()),
+            Value::String("Denied from AgentIsOK".to_string()),
         );
         decision.insert("interrupt".to_string(), Value::Bool(false));
     }
@@ -354,7 +392,7 @@ fn write_question_output(source: &str, response: &Value) -> Result<(), String> {
     Ok(())
 }
 
-fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
+fn inject_codex_hooks(exe_path: &Path, bridge_path: Option<&Path>) -> Result<(), String> {
     let Some(home) = dirs::home_dir() else {
         return Err("home directory not available".to_string());
     };
@@ -389,7 +427,7 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
         } else {
             45
         };
-        let command = build_tauri_hook_command(exe_path, "codex", event_name);
+        let command = build_tauri_hook_command(exe_path, bridge_path, "codex", event_name);
         let matcher = match *event_name {
             "SessionStart" => Some("startup|resume"),
             "UserPromptSubmit" | "PermissionRequest" | "Stop" => None,
@@ -417,7 +455,7 @@ fn inject_codex_hooks(exe_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn inject_claude_hooks(exe_path: &Path) -> Result<(), String> {
+fn inject_claude_hooks(exe_path: &Path, bridge_path: Option<&Path>) -> Result<(), String> {
     let Some(home) = dirs::home_dir() else {
         return Err("home directory not available".to_string());
     };
@@ -446,7 +484,7 @@ fn inject_claude_hooks(exe_path: &Path) -> Result<(), String> {
             "matcher": "*",
             "hooks": [{
                 "type": "command",
-                "command": build_tauri_hook_command(exe_path, "claude", event_name),
+                "command": build_tauri_hook_command(exe_path, bridge_path, "claude", event_name),
                 "timeout": if *event_name == "PermissionRequest" { 86_400 } else { 10_000 }
             }],
             "_managedBy": MANAGED_KEY
@@ -459,40 +497,31 @@ fn inject_claude_hooks(exe_path: &Path) -> Result<(), String> {
     Ok(())
 }
 
-fn build_tauri_hook_command(exe_path: &Path, source: &str, event_name: &str) -> String {
-    #[cfg(windows)]
-    let short = short_path_name(exe_path);
-    #[cfg(not(windows))]
-    let short = exe_path.display().to_string();
-    let escaped = short.replace('"', "\\\"");
+fn build_tauri_hook_command(
+    exe_path: &Path,
+    bridge_path: Option<&Path>,
+    source: &str,
+    event_name: &str,
+) -> String {
     let esc_source = source.replace('"', "\\\"");
     let esc_event = event_name.replace('"', "\\\"");
-    format!("\"{escaped}\" --hook-source \"{esc_source}\" --hook-event \"{esc_event}\"")
-}
-
-#[cfg(windows)]
-fn short_path_name(path: &Path) -> String {
-    use std::os::windows::ffi::OsStrExt;
-    let wide: Vec<u16> = path
-        .as_os_str()
-        .encode_wide()
-        .chain(std::iter::once(0))
-        .collect();
-    let mut buf = vec![0u16; 512];
-    let len = unsafe {
-        extern "system" {
-            fn GetShortPathNameW(
-                lpszLongPath: *const u16,
-                lpszShortPath: *mut u16,
-                cchBuffer: u32,
-            ) -> u32;
+    #[cfg(windows)]
+    {
+        if let Some(bridge) = bridge_path {
+            let bridge = bridge.display().to_string().replace('"', "\\\"");
+            return format!(
+                "node \"{bridge}\" --hook-source \"{esc_source}\" --hook-event \"{esc_event}\""
+            );
         }
-        GetShortPathNameW(wide.as_ptr(), buf.as_mut_ptr(), buf.len() as u32)
-    };
-    if len == 0 || len as usize > buf.len() {
-        return path.display().to_string();
+        let exe = exe_path.display().to_string().replace('"', "\\\"");
+        format!("\"{exe}\" --hook-source \"{esc_source}\" --hook-event \"{esc_event}\"")
     }
-    String::from_utf16_lossy(&buf[..len as usize])
+    #[cfg(not(windows))]
+    {
+        let _ = bridge_path;
+        let exe = exe_path.display().to_string().replace('"', "\\\"");
+        format!("\"{exe}\" --hook-source \"{esc_source}\" --hook-event \"{esc_event}\"")
+    }
 }
 
 fn is_managed_hook_value(value: &Value) -> bool {
@@ -782,7 +811,7 @@ async fn await_intervention_decision(
                 "requiresDecision": true,
                 "approved": false,
                 "allowPersistent": false,
-                "message": "ThatIsOK already has a pending approval.",
+                "message": "AgentIsOK already has a pending approval.",
                 "isQuestion": is_question
             });
         }
@@ -850,8 +879,12 @@ fn inject_opencode_hooks() -> Result<(), String> {
     };
     let plugins_dir = home.join(".config").join("opencode").join("plugins");
     fs::create_dir_all(&plugins_dir).map_err(|err| err.to_string())?;
-    let plugin_path = plugins_dir.join("thatisok.js");
-    let plugin_content = include_str!("../plugins/thatisok-opencode.js");
+    let legacy_plugin_path = plugins_dir.join("thatisok.js");
+    if legacy_plugin_path.exists() {
+        fs::remove_file(&legacy_plugin_path).map_err(|err| err.to_string())?;
+    }
+    let plugin_path = plugins_dir.join("agentisok.js");
+    let plugin_content = include_str!("../plugins/agentisok-opencode.js");
     fs::write(&plugin_path, plugin_content).map_err(|err| err.to_string())?;
     register_opencode_plugin(&home, &plugin_path)?;
     Ok(())
@@ -870,10 +903,15 @@ fn register_opencode_plugin(home: &Path, plugin_path: &Path) -> Result<(), Strin
     let plugins = config["plugin"]
         .as_array_mut()
         .ok_or_else(|| "invalid OpenCode plugin config".to_string())?;
+    plugins.retain(|item| {
+        item.as_str()
+            .map(|value| !value.contains("thatisok.js") && !value.contains("ThatIsOK"))
+            .unwrap_or(true)
+    });
     let already_registered = plugins
         .iter()
         .filter_map(Value::as_str)
-        .any(|item| item == plugin_uri || item.ends_with("/thatisok.js"));
+        .any(|item| item == plugin_uri || item.ends_with("/agentisok.js"));
     if !already_registered {
         plugins.push(Value::String(plugin_uri));
     }

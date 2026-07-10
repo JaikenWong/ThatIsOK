@@ -162,7 +162,7 @@ async fn fetch_codex_usage_api(
         .get("https://chatgpt.com/backend-api/wham/usage")
         .bearer_auth(token)
         .header("Accept", "application/json")
-        .header("User-Agent", "ThatIsOk");
+        .header("User-Agent", "AgentIsOK");
 
     if let Some(id) = account_id {
         req = req.header("ChatGPT-Account-Id", id);
