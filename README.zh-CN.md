@@ -98,9 +98,11 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 | `Ctrl/Cmd+Opt+L` | 永久批准 |
 | `Ctrl/Cmd+Opt+D` | 拒绝 |
 
+快捷键可在独立 **Settings** 窗口中自定义。从齿轮按钮或托盘菜单打开，进入 **Shortcuts**，然后按下新的组合键。
+
 ### 托盘菜单
 
-右键托盘图标（macOS 菜单栏 / Windows 系统托盘）可 **打开**、**立即同步**、**安装 Hooks**、**移除 Hooks**、查看更新状态、**退出**。
+右键托盘图标（macOS 菜单栏 / Windows 系统托盘）可 **打开**、**立即同步**、打开 **Settings**、查看更新状态、**退出**。可在 **Settings → Menu Bar** 隐藏和排序菜单项。
 
 ## Hook 工作原理
 
@@ -109,6 +111,8 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
 - `~/.gemini/config/hooks.json`（Antigravity）
+
+后台每 60 秒检测一次，如果 hook 被外部工具（如 CCSwitch 等配置切换器）移除，会自动重新注入。
 
 当工具使用权限被请求时，agent 以 `--hook-source` 和 `--hook-event` 参数调用 AgentIsOK 可执行文件。本地 TCP 服务（`127.0.0.1:45873`）接收事件，显示审批面板，并返回决定。
 
@@ -122,10 +126,13 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 
 ## 配置
 
-- **同步间隔** — 展开悬浮岛，点击设置行的 `+/-`（5 / 10 / 15 / 30 / 60 分钟）
+- **Settings 窗口** — 从齿轮按钮或托盘菜单打开；修改自动保存
+- **菜单栏** — 显示、隐藏、排序托盘菜单项；退出项始终保留
+- **同步间隔** — 在 **Settings → General** 选择 5 / 10 / 15 / 30 / 60 分钟
 - **Provider 显隐** — Usage 视图中的开关；关闭的 provider 不出现在 Home 和收起状态
 - **审批规则** — "Allow Rule / 允许规则" 会创建持久规则，保存在 `~/.config/AgentIsOK/approval-rules.json`
-- **Hooks** — 可在托盘菜单安装/移除受管 hooks，用于临时关闭 Agent 拦截
+- **快捷键** — 在 **Settings → Shortcuts** 自定义全局组合键
+- **Integrations** — 在 **Settings → Integrations** 启用或停用受管 Agent Hooks；不会修改用户自建 Hooks
 - **隐藏程序坞** — macOS：应用以辅助模式运行，仅显示托盘图标。Windows：默认不显示任务栏图标。
 
 ## 隐私
@@ -141,7 +148,7 @@ npm run tauri:build   # 生产构建 → src-tauri/target/release/bundle/
 | Provider 显示 "Stale" | 重新登录对应 provider，然后点 **Sync** |
 | 没有额度进度条 | Provider 可能需要本地登录才有数据 — 悬停 `?` 查看配置说明 |
 | Token 显示 `--` | 该 provider 没有暴露本地 token 记录，或今天还没同步到数据 |
-| Hook 不生效 | 先启动 AgentIsOK，再启动编码工具 |
+| Hook 不生效 | 先启动 AgentIsOK，再启动编码工具；hook 也会每 60 秒自动恢复（被配置切换器移除后） |
 | 小岛不显示 | `Ctrl/Cmd+Shift+Space` 切换可见性；检查托盘图标 |
 
 ## 技术栈

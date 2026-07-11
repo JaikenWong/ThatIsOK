@@ -34,6 +34,12 @@ const runtimeWarning = document.getElementById('runtimeWarning');
 const approveShortcut = document.getElementById('approveShortcut');
 const alwaysShortcut = document.getElementById('alwaysShortcut');
 const denyShortcut = document.getElementById('denyShortcut');
+const settingsPanel = document.getElementById('settingsPanel');
+const shortcutsList = document.getElementById('shortcutsList');
+const shortcutHint = document.getElementById('shortcutHint');
+const trayMenuList = document.getElementById('trayMenuList');
+const trayMenuReset = document.getElementById('trayMenuReset');
+const openSettingsButton = document.getElementById('openSettingsButton');
 const jumpToTerminalButton = document.getElementById('jumpToTerminalButton');
 const interventionAskOptions = document.getElementById('interventionAskOptions');
 const viewTabs = document.getElementById('viewTabs');
@@ -73,7 +79,8 @@ let pendingDragMove = null;
 let dragMoveFrame = null;
 let windowState = { mode: 'pill' };
 let runtimeWarningTimer = null;
-let settingsState = { syncIntervalMinutes: 10 };
+let settingsState = { syncIntervalMinutes: 10, shortcuts: {}, shortcutDisplay: {}, trayMenu: [] };
+let listeningShortcutAction = null;
 let updateReadyToRestart = false;
 let activeView = 'home';
 let approvalRules = [];
@@ -170,6 +177,9 @@ function createIpcRendererAdapter() {
         'providers:get-visibility': 'providers_get_visibility',
         'settings:get': 'settings_get',
         'settings:set-sync-interval': 'settings_set_sync_interval',
+        'settings:set-shortcuts': 'settings_set_shortcuts',
+        'settings:set-tray-menu': 'settings_set_tray_menu',
+        'settings:open': 'settings_open',
         'approval-rules:list': 'approval_rules_list',
         'approval-rules:delete': 'approval_rules_delete',
         'approval-rules:restore': 'approval_rules_restore',
@@ -1396,13 +1406,14 @@ function renderActiveView() {
     const compact = Boolean(pendingIntervention);
     island.classList.toggle('approvalView', compact);
     island.classList.toggle('usageView', !compact && activeView === 'usage');
-    island.classList.toggle('panelView', !compact && ['home', 'usage', 'rules'].includes(activeView));
+    island.classList.toggle('panelView', !compact && ['home', 'usage', 'rules', 'settings'].includes(activeView));
     viewTabs.classList.toggle('hidden', compact);
     setupHealth.classList.toggle('hidden', compact || activeView !== 'home');
     sessionsList.classList.toggle('viewHidden', compact || activeView !== 'home');
     document.querySelector('.topStack')?.classList.toggle('hidden', compact || activeView !== 'usage');
     accountsList.classList.toggle('hidden', compact || activeView !== 'usage');
     rulesPanel.classList.toggle('hidden', compact || activeView !== 'rules');
+    settingsPanel?.classList.toggle('hidden', compact || activeView !== 'settings');
     actionBar.classList.toggle('viewHidden', compact || activeView !== 'usage');
     renderRulesList();
     scheduleExpandedHeightSync();
@@ -1418,6 +1429,9 @@ function setActiveView(view) {
     });
     if (view === 'rules') {
         loadApprovalRules();
+    }
+    if (view === 'settings') {
+        loadSettings();
     }
     renderActiveView();
 }
@@ -1890,7 +1904,7 @@ function scheduleExpandedHeightSync() {
         }
 
         const compactApproval = Boolean(pendingIntervention);
-        const fixedPanelViews = ['home', 'agents', 'usage', 'rules'];
+        const fixedPanelViews = ['home', 'agents', 'usage', 'rules', 'settings'];
         const viewMinimum = compactApproval ? 245 : (fixedPanelViews.includes(activeView) ? 640 : 0);
         const naturalHeight = Math.ceil(topPadding + headerHeight + gap + contentHeight + bottomPadding + actionBarHeight);
         const desiredHeight = Math.max(viewMinimum, naturalHeight);
@@ -2101,27 +2115,54 @@ function bindInterventionButton(button, decision) {
     });
 }
 
+document.addEventListener('keydown', handleShortcutKeydown);
+
 window.addEventListener('keydown', (event) => {
     if (!pendingIntervention) {
         return;
     }
 
-    const modifierPressed = event.ctrlKey || event.metaKey;
-    const actionModifierPressed = event.altKey;
-    if (!modifierPressed || !actionModifierPressed) {
-        return;
-    }
+    const shortcuts = settingsState.shortcuts || {};
+    const actions = [
+        { key: 'approve', decision: 'approve' },
+        { key: 'approveAlways', decision: 'approve_always' },
+        { key: 'deny', decision: 'deny' }
+    ];
 
-    const key = event.key.toLowerCase();
-    if (key === 'a') {
-        sendInterventionDecision('approve');
-        event.preventDefault();
-    } else if (key === 'l') {
-        sendInterventionDecision('approve_always');
-        event.preventDefault();
-    } else if (key === 'd') {
-        sendInterventionDecision('deny');
-        event.preventDefault();
+    for (const action of actions) {
+        const combo = shortcuts[action.key];
+        if (!combo) continue;
+        const parts = combo.split('+').map(s => s.trim());
+        const needsMeta = parts.some(p => /^(cmd|super|win|ctrl|control)$/i.test(p));
+        const needsAlt = parts.some(p => /^(alt|option|opt)$/i.test(p));
+        const needsShift = parts.some(p => /^shift$/i.test(p));
+        const keyPart = parts[parts.length - 1] || '';
+        const keyLower = keyPart.toLowerCase();
+
+        const metaOk = !needsMeta || event.ctrlKey || event.metaKey;
+        const altOk = !needsAlt || event.altKey;
+        const shiftOk = !needsShift || event.shiftKey;
+        if (!metaOk || !altOk || !shiftOk) continue;
+        if (needsMeta && !event.ctrlKey && !event.metaKey) continue;
+        if (needsAlt && !event.altKey) continue;
+        if (needsShift && !event.shiftKey) continue;
+
+        const eventKey = event.key.toLowerCase();
+        let match = false;
+        if (keyLower.length === 1 && /[a-z0-9]/.test(keyLower)) {
+            match = eventKey === keyLower;
+        } else if (/^f\d+$/i.test(keyLower)) {
+            match = eventKey.toLowerCase() === keyLower;
+        } else {
+            const keyMap = { space: ' ', enter: 'enter', esc: 'escape', tab: 'tab', up: 'arrowup', down: 'arrowdown', left: 'arrowleft', right: 'arrowright' };
+            match = eventKey === (keyMap[keyLower] || keyLower);
+        }
+
+        if (match) {
+            sendInterventionDecision(action.decision);
+            event.preventDefault();
+            return;
+        }
     }
 });
 
@@ -2193,10 +2234,172 @@ function getInterventionPendingLabel(decision) {
 }
 
 function renderShortcuts() {
+    const display = settingsState.shortcutDisplay || {};
     const prefix = appPlatform === 'darwin' ? 'Cmd Opt' : 'Ctrl Alt';
-    approveShortcut.innerText = `${prefix} A`;
-    alwaysShortcut.innerText = `${prefix} L`;
-    denyShortcut.innerText = `${prefix} D`;
+    approveShortcut.innerText = display.approve || `${prefix} A`;
+    alwaysShortcut.innerText = display.approveAlways || `${prefix} L`;
+    denyShortcut.innerText = display.deny || `${prefix} D`;
+}
+
+function renderShortcutsConfig() {
+    if (!shortcutsList) return;
+    const shortcuts = settingsState.shortcuts || {};
+    const display = settingsState.shortcutDisplay || {};
+    const actions = [
+        { key: 'toggle', label: 'Toggle Island' },
+        { key: 'approve', label: 'Approve' },
+        { key: 'approveAlways', label: 'Approve Always (Rule)' },
+        { key: 'deny', label: 'Deny' }
+    ];
+    shortcutsList.innerHTML = actions.map(a => {
+        const val = shortcuts[a.key] || '';
+        const disp = display[a.key] || val;
+        const isListening = listeningShortcutAction === a.key;
+        return `<div class="shortcutItem" data-action="${a.key}">
+            <span class="shortcutLabel">${a.label}</span>
+            <span class="shortcutValue${isListening ? ' listening' : ''}">${isListening ? 'Press keys...' : disp}</span>
+            <button class="btn shortcutEdit" type="button" data-action="${a.key}">${isListening ? 'Cancel' : 'Change'}</button>
+        </div>`;
+    }).join('');
+
+    shortcutsList.querySelectorAll('.shortcutEdit').forEach(btn => {
+        btn.addEventListener('click', () => {
+            const action = btn.dataset.action;
+            if (listeningShortcutAction === action) {
+                cancelListening();
+            } else {
+                startListening(action);
+            }
+        });
+    });
+}
+
+const TRAY_MENU_ITEMS = [
+    { id: 'open-activity', label: 'Open Home' },
+    { id: 'open-agents', label: 'Running Agents' },
+    { id: 'open-usage', label: 'Usage & Providers' },
+    { id: 'open-rules', label: 'Approval Rules' },
+    { id: 'open-settings', label: 'Settings' },
+    { id: 'sync', label: 'Sync Now' },
+    { id: 'install-hooks', label: 'Install Hooks' },
+    { id: 'remove-hooks', label: 'Remove Hooks' },
+    { id: 'update', label: 'Version & Updates' }
+];
+
+function renderTrayMenuConfig() {
+    if (!trayMenuList) return;
+    const enabled = (settingsState.trayMenu || []).filter(id => !id.startsWith('sep-'));
+    const disabled = TRAY_MENU_ITEMS.map(item => item.id).filter(id => !enabled.includes(id));
+    const ordered = [...enabled, ...disabled];
+    trayMenuList.innerHTML = ordered.map((id) => {
+        const item = TRAY_MENU_ITEMS.find(candidate => candidate.id === id);
+        const active = enabled.includes(id);
+        const index = enabled.indexOf(id);
+        return `<div class="trayMenuItem${active ? '' : ' disabled'}" data-id="${id}">
+            <label class="trayMenuToggle"><input type="checkbox" ${active ? 'checked' : ''}><span></span></label>
+            <span class="trayMenuLabel">${item.label}</span>
+            <div class="trayMenuOrder">
+                <button type="button" data-move="up" title="Move up" aria-label="Move up" ${!active || index === 0 ? 'disabled' : ''}>↑</button>
+                <button type="button" data-move="down" title="Move down" aria-label="Move down" ${!active || index === enabled.length - 1 ? 'disabled' : ''}>↓</button>
+            </div>
+        </div>`;
+    }).join('');
+    trayMenuList.querySelectorAll('input').forEach(input => input.addEventListener('change', () => {
+        const id = input.closest('.trayMenuItem').dataset.id;
+        const next = [...enabled];
+        if (input.checked) next.push(id); else next.splice(next.indexOf(id), 1);
+        saveTrayMenu(next);
+    }));
+    trayMenuList.querySelectorAll('[data-move]').forEach(button => button.addEventListener('click', () => {
+        const id = button.closest('.trayMenuItem').dataset.id;
+        const from = enabled.indexOf(id);
+        const to = button.dataset.move === 'up' ? from - 1 : from + 1;
+        if (from < 0 || to < 0 || to >= enabled.length) return;
+        const next = [...enabled];
+        [next[from], next[to]] = [next[to], next[from]];
+        saveTrayMenu(next);
+    }));
+}
+
+async function saveTrayMenu(items) {
+    try {
+        const result = await ipcRenderer.invoke('settings:set-tray-menu', { items });
+        settingsState = { ...settingsState, ...(result || {}) };
+        renderTrayMenuConfig();
+    } catch (error) {
+        renderRuntimeWarning('Could not update menu bar.');
+    }
+}
+
+trayMenuReset?.addEventListener('click', () => saveTrayMenu(TRAY_MENU_ITEMS.map(item => item.id)));
+openSettingsButton?.addEventListener('click', () => ipcRenderer.invoke('settings:open'));
+
+function startListening(action) {
+    listeningShortcutAction = action;
+    shortcutHint.classList.remove('hidden');
+    renderShortcutsConfig();
+    renderTrayMenuConfig();
+}
+
+function cancelListening() {
+    listeningShortcutAction = null;
+    shortcutHint.classList.add('hidden');
+    renderShortcutsConfig();
+}
+
+function handleShortcutKeydown(e) {
+    if (!listeningShortcutAction) return;
+
+    e.preventDefault();
+    e.stopPropagation();
+
+    if (e.key === 'Escape') {
+        cancelListening();
+        return;
+    }
+
+    // Build shortcut string
+    const parts = [];
+    if (e.metaKey) parts.push('Cmd');
+    if (e.ctrlKey) parts.push('Ctrl');
+    if (e.altKey) parts.push('Alt');
+    if (e.shiftKey) parts.push('Shift');
+
+    let key = e.key;
+    if (key === ' ') key = 'Space';
+    else if (key === 'ArrowUp') key = 'Up';
+    else if (key === 'ArrowDown') key = 'Down';
+    else if (key === 'ArrowLeft') key = 'Left';
+    else if (key === 'ArrowRight') key = 'Right';
+    else if (key === 'Escape') key = 'Esc';
+    else if (key.length === 1) key = key.toUpperCase();
+
+    // Skip if only modifiers pressed
+    if (['Meta', 'Control', 'Alt', 'Shift'].includes(e.key)) return;
+
+    parts.push(key);
+    const combo = parts.join('+');
+
+    // Validate at least one modifier + key
+    if (parts.length < 2) return;
+
+    saveShortcut(listeningShortcutAction, combo);
+}
+
+async function saveShortcut(action, combo) {
+    const shortcuts = { ...(settingsState.shortcuts || {}), [action]: combo };
+    try {
+        const result = await ipcRenderer.invoke('settings:set-shortcuts', { shortcuts });
+        if (result) {
+            settingsState = { ...settingsState, ...result };
+            renderShortcuts();
+        }
+        listeningShortcutAction = null;
+        shortcutHint.classList.add('hidden');
+        renderShortcutsConfig();
+    } catch (err) {
+        console.error('Failed to save shortcut:', err);
+    }
 }
 
 function renderSettings() {
@@ -2205,6 +2408,7 @@ function renderSettings() {
     const index = SYNC_INTERVAL_STEPS.indexOf(minutes);
     syncIntervalDown.disabled = index <= 0;
     syncIntervalUp.disabled = index === -1 || index >= SYNC_INTERVAL_STEPS.length - 1;
+    renderShortcutsConfig();
 }
 
 async function loadSettings() {

@@ -98,9 +98,11 @@ npm run tauri:build   # release build → src-tauri/target/release/bundle/
 | `Ctrl/Cmd+Opt+L` | Approve always (persistent rule) |
 | `Ctrl/Cmd+Opt+D` | Deny current permission request |
 
+Shortcuts are customizable in the dedicated **Settings** window. Open it from the gear button or tray menu, select **Shortcuts**, then press a new key combination.
+
 ### Tray menu
 
-Right-click the tray icon (macOS menu bar / Windows system tray) for **Open**, **Sync Now**, **Install Hooks**, **Remove Hooks**, update status, and **Quit**.
+Right-click the tray icon (macOS menu bar / Windows system tray) for **Open**, **Sync Now**, **Settings**, update status, and **Quit**. Menu items can be hidden and reordered under **Settings → Menu Bar**.
 
 ## How hooks work
 
@@ -109,6 +111,8 @@ On startup, AgentIsOK writes managed entries into:
 - `~/.claude/settings.json`
 - `~/.codex/hooks.json`
 - `~/.gemini/config/hooks.json` (Antigravity)
+
+A background check runs every 60 seconds and re-injects any hooks that were removed by external tools (e.g. config switchers like CCSwitch).
 
 When a tool-use permission is requested, the agent invokes the AgentIsOK binary with `--hook-source` and `--hook-event`. A TCP server on `127.0.0.1:45873` receives the event, displays the approval panel, and returns the decision.
 
@@ -122,10 +126,13 @@ Copy `src-tauri/plugins/agentisok-opencode.js` to `~/.config/opencode/plugins/`,
 
 ## Configuration
 
-- **Sync interval** — expand the island, use `+/-` buttons in the settings row (5 / 10 / 15 / 30 / 60 minutes)
+- **Settings window** — open from the gear button or tray menu; preferences save automatically
+- **Menu bar** — show, hide, and reorder tray menu items; Quit always remains available
+- **Sync interval** — choose 5 / 10 / 15 / 30 / 60 minutes under **Settings → General**
 - **Provider visibility** — toggle switches in the Usage tab; hidden providers are excluded from Home and collapsed meters
 - **Approval rules** — "Allow Rule" creates persistent rules stored in `~/.config/AgentIsOK/approval-rules.json`
-- **Hooks** — install/remove managed hooks from the tray menu when you want to temporarily disable agent interception
+- **Shortcuts** — customize global key combinations under **Settings → Shortcuts**
+- **Integrations** — enable or disable managed agent hooks under **Settings → Integrations**; user-managed hooks remain untouched
 - **Hide from Dock** — macOS: app runs as accessory, tray-icon only. Windows: `skipTaskbar` by default.
 
 ## Privacy
@@ -141,7 +148,7 @@ Copy `src-tauri/plugins/agentisok-opencode.js` to `~/.config/opencode/plugins/`,
 | Provider shows "Stale" | Re-login to the provider, then click **Sync** |
 | No usage bars appear | Provider may need a local login before data is available — hover the `?` badge for setup instructions |
 | Token count shows `--` | That provider does not expose local token records, or it has not synced today |
-| Hooks not working | Restart the coding agent after AgentIsOK has started |
+| Hooks not working | Restart the coding agent after AgentIsOK has started; hooks are also auto-restored every 60s if removed by config switchers |
 | Island not showing | `Ctrl/Cmd+Shift+Space` toggles visibility; check tray icon |
 
 ## Tech stack

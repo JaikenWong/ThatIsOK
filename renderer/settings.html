@@ -1,0 +1,61 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>AgentIsOK Settings</title>
+    <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+    <main class="settingsShell">
+        <aside class="settingsNav">
+            <div class="brandMark"><span></span>AgentIsOK</div>
+            <nav>
+                <button class="navItem active" data-page="menu" type="button">Menu Bar</button>
+                <button class="navItem" data-page="shortcuts" type="button">Shortcuts</button>
+                <button class="navItem" data-page="integrations" type="button">Integrations</button>
+                <button class="navItem" data-page="general" type="button">General</button>
+            </nav>
+            <div class="navVersion">Settings</div>
+        </aside>
+        <section class="settingsContent">
+            <header>
+                <div><p>Preferences</p><h1 id="pageTitle">Menu Bar</h1></div>
+                <button id="resetButton" class="quietButton" type="button">Reset defaults</button>
+            </header>
+            <div id="menuPage" class="page active">
+                <p class="pageLead">Choose what appears under AgentIsOK tray icon. Drag items to set order.</p>
+                <div id="menuList" class="menuList"></div>
+                <div class="lockedRow"><span class="dragPlaceholder">·</span><span>Quit</span><small>Always visible</small><span class="lockIcon">Locked</span></div>
+            </div>
+            <div id="shortcutsPage" class="page">
+                <p class="pageLead">Set global shortcuts. Click key field, then press combination.</p>
+                <div id="shortcutList" class="shortcutList"></div>
+                <p id="shortcutStatus" class="statusText"></p>
+            </div>
+            <div id="generalPage" class="page">
+                <p class="pageLead">Control background refresh behavior.</p>
+                <div class="preferenceRow"><div><strong>Sync cadence</strong><span>Refresh provider usage automatically</span></div><select id="syncInterval"><option value="5">5 minutes</option><option value="10">10 minutes</option><option value="15">15 minutes</option><option value="30">30 minutes</option><option value="60">60 minutes</option></select></div>
+            </div>
+            <div id="integrationsPage" class="page">
+                <p class="pageLead">Connect AgentIsOK to supported coding agents for approvals and live activity.</p>
+                <div class="integrationPanel">
+                    <div class="integrationHeader">
+                        <div class="integrationGlyph">AI</div>
+                        <div><strong>Agent Integration</strong><span>Codex, Claude Code, OpenCode and compatible agents</span></div>
+                        <span id="integrationStatus" class="statusBadge">Checking</span>
+                    </div>
+                    <div class="integrationDetail">Receives permission requests, tool activity and session status. Existing user hooks remain untouched.</div>
+                    <div class="integrationActions">
+                        <button id="enableIntegration" class="primaryButton" type="button">Enable Integration</button>
+                        <button id="disableIntegration" class="dangerButton" type="button">Disable Integration</button>
+                    </div>
+                </div>
+                <p id="integrationMessage" class="statusText"></p>
+            </div>
+            <div id="saveStatus" class="saveStatus">Changes save automatically</div>
+        </section>
+    </main>
+    <script src="settings.js"></script>
+</body>
+</html>

@@ -1,5 +1,22 @@
 {
   "syncIntervalMinutes": 10,
+  "shortcuts": {
+    "toggle": "Space",
+    "approve": "A",
+    "approveAlways": "L",
+    "deny": "D"
+  },
+  "trayMenu": [
+    "open-activity",
+    "open-agents",
+    "open-usage",
+    "open-rules",
+    "open-settings",
+    "sep-view",
+    "sync",
+    "sep-app",
+    "update"
+  ],
   "alerts": {
     "lowBalanceUsd": 20,
     "lowRunwayDays": 3

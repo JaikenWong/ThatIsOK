@@ -696,7 +696,7 @@ body, html {
 
 .viewTabs {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr)) 34px;
     gap: 2px;
     padding: 3px;
     border-radius: var(--r-md);
@@ -704,6 +704,8 @@ body, html {
     border: 1px solid var(--b-subtle);
     -webkit-app-region: no-drag;
 }
+
+.settingsTabButton { width: 34px; font-size: 14px; }
 
 .viewTab {
     border: 0;
@@ -2846,4 +2848,105 @@ body, html {
 @keyframes agentBarWait {
     0%, 100% { transform: scaleY(0.5); }
     50%      { transform: scaleY(0.85); }
+}
+
+/* ── Settings Panel ─────────────────────────────────────── */
+
+.settingsPanel {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    padding: 4px 0;
+}
+
+.settingsSection {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.settingsSectionTitle {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--t-primary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.settingsSectionHeader { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.settingsSectionNote { margin-top: 2px; font-size: 9px; color: var(--t-tertiary); }
+.settingsDivider { height: 1px; background: var(--b-subtle); }
+.settingsTextButton { border: 0; background: transparent; color: var(--c-accent); font: 600 10px var(--font-ui); cursor: pointer; }
+.trayMenuList { display: flex; flex-direction: column; gap: 4px; }
+.trayMenuItem { display: flex; align-items: center; gap: 8px; min-height: 28px; padding: 2px 6px; border: 1px solid var(--b-subtle); border-radius: 6px; background: var(--c-surface); }
+.trayMenuItem.disabled { opacity: .52; }
+.trayMenuLabel { flex: 1; min-width: 0; font-size: 10px; color: var(--t-primary); }
+.trayMenuToggle input { position: absolute; opacity: 0; pointer-events: none; }
+.trayMenuToggle span { display: block; width: 24px; height: 14px; border-radius: 7px; background: var(--c-elevated); position: relative; cursor: pointer; }
+.trayMenuToggle span::after { content: ''; position: absolute; width: 10px; height: 10px; left: 2px; top: 2px; border-radius: 50%; background: var(--t-secondary); transition: transform .15s var(--ease-out); }
+.trayMenuToggle input:checked + span { background: var(--c-accent-dim); box-shadow: inset 0 0 0 1px var(--c-ok-border); }
+.trayMenuToggle input:checked + span::after { transform: translateX(10px); background: var(--c-accent); }
+.trayMenuOrder { display: flex; width: 48px; justify-content: flex-end; }
+.trayMenuOrder button { width: 22px; height: 22px; border: 0; background: transparent; color: var(--t-secondary); cursor: pointer; font-size: 13px; }
+.trayMenuOrder button:disabled { opacity: .18; cursor: default; }
+
+.shortcutsList {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.shortcutItem {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 8px;
+    border-radius: var(--r-sm);
+    background: var(--c-surface);
+    border: 1px solid var(--b-subtle);
+}
+
+.shortcutLabel {
+    flex: 1;
+    font-size: 11px;
+    color: var(--t-primary);
+    font-weight: 500;
+}
+
+.shortcutValue {
+    font-size: 11px;
+    font-family: var(--font-mono);
+    font-weight: 600;
+    color: var(--t-tertiary);
+    background: var(--c-surface-2);
+    padding: 2px 6px;
+    border-radius: 4px;
+    min-width: 80px;
+    text-align: center;
+}
+
+.shortcutValue.listening {
+    color: var(--c-accent);
+    animation: pulse 1s ease-in-out infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.shortcutEdit {
+    font-size: 9px;
+    padding: 2px 8px;
+    min-height: 22px;
+    height: 22px;
+    line-height: 1;
+}
+
+.shortcutHint {
+    font-size: 10px;
+    color: var(--c-accent);
+    text-align: center;
+    padding: 4px 0;
+    font-weight: 500;
 }

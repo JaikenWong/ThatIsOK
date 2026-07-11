@@ -146,6 +146,72 @@ fn ensure_bridge_script() -> Result<std::path::PathBuf, String> {
     Ok(bridge_path)
 }
 
+pub(crate) fn hooks_intact() -> bool {
+    let Some(home) = dirs::home_dir() else {
+        return true;
+    };
+    claude_hooks_present(&home)
+        && codex_hooks_present(&home)
+        && antigravity_hooks_present(&home)
+        && opencode_plugin_present(&home)
+}
+
+fn claude_hooks_present(home: &Path) -> bool {
+    let path = home.join(".claude").join("settings.json");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return true; // file doesn't exist, skip (not our job to create it)
+    };
+    let Ok(config) = serde_json::from_str::<Value>(&content) else {
+        return true; // malformed, don't touch
+    };
+    config
+        .get("hooks")
+        .and_then(Value::as_object)
+        .is_some_and(|hooks| hooks.values().any(|v| {
+            v.as_array()
+                .is_some_and(|arr| arr.iter().any(is_managed_hook_value))
+        }))
+}
+
+fn codex_hooks_present(home: &Path) -> bool {
+    let path = home.join(".codex").join("hooks.json");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return true; // no file, skip
+    };
+    let Ok(config) = serde_json::from_str::<Value>(&content) else {
+        return true;
+    };
+    config
+        .get("hooks")
+        .and_then(Value::as_object)
+        .is_some_and(|hooks| hooks.values().any(|v| {
+            v.as_array()
+                .is_some_and(|arr| arr.iter().any(is_managed_hook_value))
+        }))
+}
+
+fn antigravity_hooks_present(home: &Path) -> bool {
+    let path = home.join(".gemini").join("config").join("hooks.json");
+    let Ok(content) = fs::read_to_string(&path) else {
+        return true; // no file, skip
+    };
+    let Ok(config) = serde_json::from_str::<Value>(&content) else {
+        return true;
+    };
+    config
+        .get(ANTIGRAVITY_HOOK_NAME)
+        .is_some_and(is_managed_hook_value)
+}
+
+fn opencode_plugin_present(home: &Path) -> bool {
+    let plugin_path = home
+        .join(".config")
+        .join("opencode")
+        .join("plugins")
+        .join("agentisok.js");
+    plugin_path.exists()
+}
+
 pub(crate) fn remove_agent_hooks() -> Result<(), String> {
     let Some(home) = dirs::home_dir() else {
         return Err("home directory not available".to_string());

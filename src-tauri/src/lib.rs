@@ -15,7 +15,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
-use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
+use tauri::menu::{Menu, MenuBuilder, MenuItemBuilder, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, PhysicalSize, WebviewWindow};
 use tokio::sync::{oneshot, Notify};
@@ -1412,9 +1412,96 @@ fn providers_set_visibility(app: AppHandle, provider: String, visible: bool) -> 
 
 #[tauri::command]
 fn settings_get(app: AppHandle) -> Value {
+    let defaults = read_json_file("defaults.json");
+    let shortcuts = defaults
+        .get("shortcuts")
+        .cloned()
+        .unwrap_or_else(shortcuts::default_shortcuts_json);
+    let shortcut_display = shortcuts
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| (k.clone(), Value::String(shortcuts::display_shortcut(v.as_str().unwrap_or("")))))
+                .collect::<serde_json::Map<String, Value>>()
+        })
+        .map(Value::Object)
+        .unwrap_or_else(|| json!({}));
     json!({
-        "syncIntervalMinutes": current_sync_interval(&app)
+        "syncIntervalMinutes": current_sync_interval(&app),
+        "shortcuts": shortcuts,
+        "shortcutDisplay": shortcut_display,
+        "trayMenu": tray_menu_config(&defaults)
     })
+}
+
+#[tauri::command]
+fn settings_open(app: AppHandle) -> Result<(), String> {
+    let window = app.get_webview_window("settings").ok_or("settings window not found")?;
+    window.show().map_err(|error| error.to_string())?;
+    window.set_focus().map_err(|error| error.to_string())
+}
+
+const TRAY_MENU_IDS: &[&str] = &[
+    "open-activity", "open-agents", "open-usage", "open-rules", "open-settings",
+    "sync", "update",
+];
+
+fn tray_menu_config(defaults: &Value) -> Vec<String> {
+    defaults.get("trayMenu").and_then(Value::as_array).map(|items| {
+        items.iter().filter_map(Value::as_str).filter(|id| {
+            TRAY_MENU_IDS.contains(id) || id.starts_with("sep-")
+        }).map(str::to_string).collect()
+    }).unwrap_or_else(|| TRAY_MENU_IDS.iter().map(|id| (*id).to_string()).collect())
+}
+
+fn build_tray_menu(app: &AppHandle) -> Result<Menu<tauri::Wry>, String> {
+    let menu = Menu::new(app).map_err(|error| error.to_string())?;
+    let version = app.package_info().version.to_string();
+    for id in tray_menu_config(&read_json_file("defaults.json")) {
+        if id.starts_with("sep-") {
+            let item = PredefinedMenuItem::separator(app).map_err(|error| error.to_string())?;
+            menu.append(&item).map_err(|error| error.to_string())?;
+            continue;
+        }
+        let label = match id.as_str() {
+            "open-activity" => "Open Home".to_string(),
+            "open-agents" => "Running Agents".to_string(),
+            "open-usage" => "Usage & Providers".to_string(),
+            "open-rules" => "Approval Rules".to_string(),
+            "open-settings" => "Settings".to_string(),
+            "sync" => "Sync Now".to_string(),
+            "update" => format!("AgentIsOK v{version}"),
+            _ => continue,
+        };
+        let item = MenuItemBuilder::with_id(id, label).build(app).map_err(|error| error.to_string())?;
+        menu.append(&item).map_err(|error| error.to_string())?;
+    }
+    menu.append(&PredefinedMenuItem::separator(app).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    menu.append(&MenuItemBuilder::with_id("quit", "Quit").build(app).map_err(|error| error.to_string())?)
+        .map_err(|error| error.to_string())?;
+    Ok(menu)
+}
+
+#[tauri::command]
+fn settings_set_tray_menu(app: AppHandle, items: Vec<String>) -> Result<Value, String> {
+    let mut unique = Vec::new();
+    for id in items {
+        if !TRAY_MENU_IDS.contains(&id.as_str()) {
+            return Err(format!("unknown tray menu item: {id}"));
+        }
+        if !unique.contains(&id) {
+            unique.push(id);
+        }
+    }
+    let mut defaults = read_json_file("defaults.json");
+    defaults["trayMenu"] = json!(unique);
+    write_defaults(&defaults)?;
+    let menu = build_tray_menu(&app)?;
+    if let Some(tray) = app.tray_by_id("main-tray") {
+        tray.set_menu(Some(menu)).map_err(|error| error.to_string())?;
+    }
+    Ok(json!({ "trayMenu": tray_menu_config(&defaults) }))
 }
 
 #[tauri::command]
@@ -1426,6 +1513,37 @@ fn settings_set_sync_interval(app: AppHandle, minutes: u64) -> Result<Value, Str
     set_sync_interval(&app, clamped);
     Ok(json!({
         "syncIntervalMinutes": clamped
+    }))
+}
+
+#[tauri::command]
+fn settings_set_shortcuts(app: AppHandle, shortcuts: Value) -> Result<Value, String> {
+    // Validate each shortcut parses correctly
+    for (action, val) in shortcuts.as_object().ok_or("invalid shortcuts format")? {
+        let s = val.as_str().ok_or(format!("shortcut '{action}' must be a string"))?;
+        if shortcuts::parse_code(s).is_none() && shortcuts::parse_shortcut(s).is_none() {
+            return Err(format!("invalid shortcut for '{action}': '{s}'"));
+        }
+    }
+    let mut defaults = read_json_file("defaults.json");
+    defaults["shortcuts"] = shortcuts;
+    write_defaults(&defaults)?;
+    shortcuts::reload_shortcuts(&app);
+
+    // Build response with display strings
+    let shortcuts = defaults.get("shortcuts").cloned().unwrap_or_else(|| json!({}));
+    let shortcut_display = shortcuts
+        .as_object()
+        .map(|m| {
+            m.iter()
+                .map(|(k, v)| (k.clone(), Value::String(shortcuts::display_shortcut(v.as_str().unwrap_or("")))))
+                .collect::<serde_json::Map<String, Value>>()
+        })
+        .map(Value::Object)
+        .unwrap_or_else(|| json!({}));
+    Ok(json!({
+        "shortcuts": shortcuts,
+        "shortcutDisplay": shortcut_display
     }))
 }
 
@@ -1539,6 +1657,27 @@ fn uninstall_hooks(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[tauri::command]
+fn integrations_get() -> Value {
+    let enabled = hooks_enabled();
+    json!({
+        "enabled": enabled,
+        "healthy": enabled && hooks::hooks_intact()
+    })
+}
+
+#[tauri::command]
+fn integrations_enable(app: AppHandle) -> Result<Value, String> {
+    install_hooks(&app)?;
+    Ok(integrations_get())
+}
+
+#[tauri::command]
+fn integrations_disable(app: AppHandle) -> Result<Value, String> {
+    uninstall_hooks(&app)?;
+    Ok(integrations_get())
+}
+
 async fn perform_initial_sync(app: AppHandle) {
     let accounts = sync_provider_accounts().await;
     let _ = replace_usage_balances(&app, accounts);
@@ -1554,6 +1693,22 @@ async fn perform_initial_sync(app: AppHandle) {
             .unwrap_or(&[]),
     );
     let _ = app.emit("island-data", data);
+}
+
+fn schedule_hooks_check(app: AppHandle) {
+    tauri::async_runtime::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(60)).await;
+            if !hooks_enabled() {
+                continue;
+            }
+            if hooks::hooks_intact() {
+                continue;
+            }
+            eprintln!("hooks missing, re-injecting");
+            hooks::inject_agent_hooks(&app);
+        }
+    });
 }
 
 fn schedule_periodic_sync(app: AppHandle) {
@@ -1607,6 +1762,14 @@ fn replace_usage_balances(app: &AppHandle, accounts: Vec<Value>) -> bool {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .on_window_event(|window, event| {
+            if window.label() == "settings" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+        })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(AppState::default())
@@ -1624,7 +1787,13 @@ pub fn run() {
             providers_get_visibility,
             providers_set_visibility,
             settings_get,
+            settings_open,
             settings_set_sync_interval,
+            settings_set_shortcuts,
+            settings_set_tray_menu,
+            integrations_get,
+            integrations_enable,
+            integrations_disable,
             approval_rules_list,
             approval_rules_delete,
             approval_rules_restore,
@@ -1681,6 +1850,9 @@ pub fn run() {
                 let open_rules = MenuItemBuilder::with_id("open-rules", "Approval Rules")
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
+                let open_settings = MenuItemBuilder::with_id("open-settings", "Settings")
+                    .build(app)
+                    .map_err(|e| format!("tray menu: {e}")).ok();
                 let sync_item = MenuItemBuilder::with_id("sync", "Sync Now")
                     .build(app)
                     .map_err(|e| format!("tray menu: {e}")).ok();
@@ -1710,6 +1882,7 @@ pub fn run() {
                     Some(open_agents),
                     Some(open_usage),
                     Some(open_rules),
+                    Some(open_settings),
                     Some(sync_item),
                     Some(install_hooks_item),
                     Some(remove_hooks_item),
@@ -1723,6 +1896,7 @@ pub fn run() {
                     open_agents,
                     open_usage,
                     open_rules,
+                    open_settings,
                     sync_item,
                     install_hooks_item,
                     remove_hooks_item,
@@ -1739,6 +1913,7 @@ pub fn run() {
                             &open_agents,
                             &open_usage,
                             &open_rules,
+                            &open_settings,
                             &sep_view,
                             &sync_item,
                             &sep_hooks,
@@ -1751,12 +1926,15 @@ pub fn run() {
                         .build()
                         .map_err(|e| format!("tray menu: {e}")).ok();
 
-                    if let Some(menu) = menu {
-                        let _tray = TrayIconBuilder::new()
+                    if let Some(menu) = build_tray_menu(app.handle()).ok().or(menu) {
+                        let _tray = TrayIconBuilder::with_id("main-tray")
                             .icon(icon)
                             .menu(&menu)
                             .on_menu_event(move |app_handle_inner, event| {
                                 match event.id().as_ref() {
+                                    "open-settings" => {
+                                        let _ = settings_open(app_handle_inner.clone());
+                                    }
                                     "open-activity" | "open-agents" | "open-usage" | "open-rules" => {
                                         if let Ok(window) = main_window(&app_handle_inner) {
                                             let _ = window.show();
@@ -1894,6 +2072,9 @@ pub fn run() {
 
             // Periodic sync
             schedule_periodic_sync(app.handle().clone());
+
+            // Periodic hooks integrity check
+            schedule_hooks_check(app.handle().clone());
 
             Ok(())
         })

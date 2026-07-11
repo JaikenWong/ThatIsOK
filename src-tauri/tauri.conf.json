@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "AgentIsOK",
-  "version": "0.0.1",
+  "version": "0.0.2",
   "identifier": "com.agentisok.desktop",
   "build": {
     "beforeDevCommand": "",
@@ -23,6 +23,20 @@
         "alwaysOnTop": true,
         "shadow": false,
         "backgroundColor": "#00000000"
+      },
+      {
+        "label": "settings",
+        "title": "AgentIsOK Settings",
+        "url": "settings.html",
+        "width": 680,
+        "height": 620,
+        "minWidth": 620,
+        "minHeight": 560,
+        "resizable": true,
+        "decorations": true,
+        "visible": false,
+        "center": true,
+        "backgroundColor": "#1e1f21"
       }
     ],
     "security": {
