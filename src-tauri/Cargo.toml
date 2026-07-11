@@ -1,6 +1,6 @@
 [package]
 name = "agentisok"
-version = "1.0.8"
+version = "0.0.1"
 description = "AI agent cost and approval cockpit"
 authors = ["AgentIsOK"]
 edition = "2021"
