@@ -17,6 +17,11 @@ AgentIsOK is a **floating island** that lives on your desktop. It intercepts per
 ## What it does
 
 - **Permission approval** — approve, create allow rules, answer ask prompts, or deny tool-use requests without tabbing back to terminal
+
+<p align="center">
+  <img src="assets/images/approve.png" alt="AgentIsOK Approval panel for tool-use permission requests" width="360" />
+</p>
+
 - **Home dashboard** — provider health, running agents, exact/estimated token usage, and today’s local activity in one view
 - **Usage tracking** — real-time progress bars for 5h / weekly / monthly quotas, credits, balances, and reset times
 - **Token accounting** — exact local token usage for Claude, Codex, and OpenCode when their logs expose token data, plus Antigravity local activity
