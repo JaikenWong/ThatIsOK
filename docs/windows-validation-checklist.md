@@ -22,7 +22,7 @@ Record these before testing:
 - Windows version
 - architecture: `x64` / `arm64`
 - shell used for build: `PowerShell` / `cmd`
-- whether Codex / Claude / Cursor / Antigravity / MiniMax / DeepSeek credentials already exist
+- which agent credentials exist: Claude Code / Codex / Cursor / Antigravity / MiniMax / DeepSeek / OpenCode / Kiro
 
 ## Build
 
@@ -82,14 +82,23 @@ Fail release if:
 
 1. Confirm tray icon appears.
 2. Left click tray icon.
-3. Open tray menu.
+3. Right click → open tray menu.
 
 Expected evidence:
 
 - left click expands and focuses island
 - tray menu contains:
-  - `Open`
+  - `Open Home`
+  - `Running Agents`
+  - `Usage & Providers`
+  - `Approval Rules`
+  - `---`
   - `Sync Now`
+  - `---`
+  - `Install Hooks`
+  - `Remove Hooks`
+  - `---`
+  - `AgentIsOK v{version}`
   - `Quit`
 - `Quit` exits app fully
 
@@ -122,10 +131,10 @@ Fail release if:
 
 Verify:
 
-- `Ctrl + Shift + Space` toggles island
+- `Ctrl + Shift + Space` toggles island (expands and focuses)
 - with pending approval:
   - `Ctrl + Alt + A` approves
-  - `Ctrl + Alt + L` approves permanently
+  - `Ctrl + Alt + L` approves permanently (creates rule)
   - `Ctrl + Alt + D` denies
 
 Expected evidence:
@@ -145,6 +154,7 @@ Launch packaged app once, then inspect:
 
 - `%USERPROFILE%\.codex\hooks.json`
 - `%USERPROFILE%\.claude\settings.json`
+- `%USERPROFILE%\.gemini\config\hooks.json`
 
 Expected evidence:
 
@@ -162,6 +172,7 @@ PowerShell checks:
 ```powershell
 Select-String -Path "$env:USERPROFILE\.codex\hooks.json" -Pattern "AgentIsOK.exe","--hook-source","--hook-event"
 Select-String -Path "$env:USERPROFILE\.claude\settings.json" -Pattern "AgentIsOK.exe","--hook-source","--hook-event"
+Select-String -Path "$env:USERPROFILE\.gemini\config\hooks.json" -Pattern "AgentIsOK.exe","--hook-source","--hook-event"
 Select-String -Path "$env:USERPROFILE\.codex\hooks.json" -Pattern "node|hook-bridge\.js"
 Select-String -Path "$env:USERPROFILE\.claude\settings.json" -Pattern "node|hook-bridge\.js"
 ```
@@ -227,13 +238,14 @@ Expected evidence:
 
 Providers to verify when credentials exist:
 
+- Claude Code
 - Codex
-- Claude
 - Cursor
 - MiniMax
-- Antigravity
+- Antigravity (Gemini)
 - DeepSeek
-- OpenCode if configured
+- OpenCode
+- Kiro
 
 Fail release if:
 
